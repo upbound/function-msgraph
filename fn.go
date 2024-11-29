@@ -8,7 +8,7 @@ import (
 	fnv1 "github.com/crossplane/function-sdk-go/proto/v1"
 	"github.com/crossplane/function-sdk-go/request"
 	"github.com/crossplane/function-sdk-go/response"
-	"github.com/crossplane/function-azresourcegraph/input/v1beta1"
+	"github.com/upboundcare/function-azresourcegraph/input/v1beta1"
 )
 
 // Function returns whatever response you ask it to.
@@ -46,8 +46,8 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 	}
 
 	// TODO: Add your Function logic here!
-	response.Normalf(rsp, "I was run with input %q!", in.Example)
-	f.log.Info("I was run!", "input", in.Example)
+	response.Normalf(rsp, "I was run with input %q!", in.Query)
+	f.log.Info("I was run!", "input", in.Query)
 
 	// You can set a custom status condition on the claim. This allows you to
 	// communicate with the user. See the link below for status condition
