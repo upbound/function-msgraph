@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/crossplane/crossplane-runtime/pkg/errors"
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
@@ -21,6 +22,11 @@ type Function struct {
 // RunFunction runs the Function.
 func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) (*fnv1.RunFunctionResponse, error) {
 	f.log.Info("Running function", "tag", req.GetMeta().GetTag())
+
+	// Get and print secrets
+	for name, credential := range req.GetCredentials() {
+		fmt.Printf("Name: %s, Value: %s\n", name, string(credential.GetCredentialData().Data["credentials"]))
+	}
 
 	rsp := response.To(req, response.DefaultTTL)
 
@@ -48,6 +54,44 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 	// TODO: Add your Function logic here!
 	response.Normalf(rsp, "I was run with input %q!", in.Query)
 	f.log.Info("I was run!", "input", in.Query)
+
+	// The composite resource that actually exists.
+	oxr, err := request.GetObservedCompositeResource(req)
+	if err != nil {
+		response.Fatal(rsp, errors.Wrap(err, "cannot get observed composite resource"))
+		return rsp, nil
+	}
+
+	// The composite resource desired by previous functions in the pipeline.
+	dxr, err := request.GetDesiredCompositeResource(req)
+	if err != nil {
+		response.Fatal(rsp, errors.Wrap(err, "cannot get desired composite resource"))
+		return rsp, nil
+	}
+	dxr.Resource.SetAPIVersion(oxr.Resource.GetAPIVersion())
+	dxr.Resource.SetKind(oxr.Resource.GetKind())
+	// The composed resources desired by any previous Functions in the pipeline.
+	desired, err := request.GetDesiredComposedResources(req)
+	if err != nil {
+		response.Fatal(rsp, errors.Wrapf(err, "cannot get desired composed resources from %T", req))
+		return rsp, nil
+	}
+
+	err = dxr.Resource.SetString("status.azResourceGraphQuery.test", "queryresult")
+	if err != nil {
+		response.Fatal(rsp, errors.Wrapf(err, "cannot set field %s to %s for %s", "status.azResourceGraphQuery.test", "queryresult", dxr.Resource.GetKind()))
+		return rsp, nil
+	}
+
+	if err := response.SetDesiredCompositeResource(rsp, dxr); err != nil {
+		response.Fatal(rsp, errors.Wrapf(err, "cannot set desired composite resource in %T", rsp))
+		return rsp, nil
+	}
+
+	if err := response.SetDesiredComposedResources(rsp, desired); err != nil {
+		response.Fatal(rsp, errors.Wrapf(err, "cannot set desired composed resources in %T", rsp))
+		return rsp, nil
+	}
 
 	// You can set a custom status condition on the claim. This allows you to
 	// communicate with the user. See the link below for status condition

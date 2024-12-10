@@ -15,3 +15,9 @@ spec:
       apiVersion: azresourcegraph.fn.crossplane.io/v1alpha1
       kind: Input
       query: "Hello world"
+    credentials:
+      - name: default
+        source: Secret
+        secretRef:
+          namespace: default
+          name: default
