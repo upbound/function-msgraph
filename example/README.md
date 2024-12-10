@@ -10,7 +10,7 @@ $ go run . --insecure --debug
 
 ```shell
 # Then, in another terminal, call it with these example manifests
-$ crossplane render example/xr.yaml example/composition.yaml example/functions.yaml --function-credentials=example/secrets/default.yaml -r
+$ crossplane render example/xr.yaml example/composition.yaml example/functions.yaml --function-credentials=example/secrets/azure-creds.yaml -r
 ---
 apiVersion: example.crossplane.io/v1
 kind: XR

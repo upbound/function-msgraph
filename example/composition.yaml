@@ -16,8 +16,8 @@ spec:
       kind: Input
       query: "Hello world"
     credentials:
-      - name: default
+      - name: azure-creds
         source: Secret
         secretRef:
-          namespace: default
-          name: default
+          namespace: upbound-system
+          name: azure-account-creds
