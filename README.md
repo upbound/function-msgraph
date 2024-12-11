@@ -1,44 +1,66 @@
-# function-template-go
-[![CI](https://github.com/crossplane/function-template-go/actions/workflows/ci.yml/badge.svg)](https://github.com/crossplane/function-template-go/actions/workflows/ci.yml)
+# function-azresourcegraph
+[![CI](https://github.com/UpboundCare//function-azresourcegraph/actions/workflows/ci.yml/badge.svg)](https://github.com/UpboundCare/function-azresourcegraph/actions/workflows/ci.yml)
 
-A template for writing a [composition function][functions] in [Go][go].
+A function to query [Azure Resource Graph][azresourcegraph]
 
-To learn how to use this template:
+## Usage
 
-* [Follow the guide to writing a composition function in Go][function guide]
-* [Learn about how composition functions work][functions]
-* [Read the function-sdk-go package documentation][package docs]
+See [examples][examples]
 
-If you just want to jump in and get started:
+Example pipeline step:
 
-1. Replace `function-template-go` with your function in `go.mod`,
-   `package/crossplane.yaml`, and any Go imports. (You can also do this
-   automatically by running the `./init.sh <function-name>` script.)
-1. Update `input/v1beta1/` to reflect your desired input (and run `go generate`)
-1. Add your logic to `RunFunction` in `fn.go`
-1. Add tests for your logic in `fn_test.go`
-1. Update this file, `README.md`, to be about your function!
-
-This template uses [Go][go], [Docker][docker], and the [Crossplane CLI][cli] to
-build functions.
-
-```shell
-# Run code generation - see input/generate.go
-$ go generate ./...
-
-# Run tests - see fn_test.go
-$ go test ./...
-
-# Build the function's runtime image - see Dockerfile
-$ docker build . --tag=runtime
-
-# Build a function package - see package/crossplane.yaml
-$ crossplane xpkg build -f package --embed-runtime-image=runtime
+```yaml
+  pipeline:
+  - step: query-azresourcegraph
+    functionRef:
+      name: function-azresourcegraph
+    input:
+      apiVersion: azresourcegraph.fn.crossplane.io/v1alpha1
+      kind: Input
+      query: "Resources | project name, location, type, id| where type =~ 'Microsoft.Compute/virtualMachines' | order by name desc"
+    credentials:
+      - name: azure-creds
+        source: Secret
+        secretRef:
+          namespace: upbound-system
+          name: azure-account-creds
 ```
 
-[functions]: https://docs.crossplane.io/latest/concepts/composition-functions
-[go]: https://go.dev
-[function guide]: https://docs.crossplane.io/knowledge-base/guides/write-a-composition-function-in-go
-[package docs]: https://pkg.go.dev/github.com/crossplane/function-sdk-go
-[docker]: https://www.docker.com
-[cli]: https://docs.crossplane.io/latest/cli
+The Azure Credentials Secret structure is fully compatible with the standard
+[Azure Official Provider][azop]
+
+Example XR status after e2e query:
+
+```yaml
+apiVersion: example.crossplane.io/v1
+kind: XR
+metadata:
+...
+status:
+  azResourceGraphQueryResult:
+  - id: /subscriptions/f403a412-959c-4214-8c4d-ad5598f149cc/resourceGroups/us-vm-zxqnj-s2jdb/providers/Microsoft.Compute/virtualMachines/us-vm-zxqnj-2h59v
+    location: centralus
+    name: us-vm-zxqnj-2h59v
+    type: microsoft.compute/virtualmachines
+  - id: /subscriptions/f403a412-959c-4214-8c4d-ad5598f149cc/resourceGroups/us-vm-lzbpt-tdv2h/providers/Microsoft.Compute/virtualMachines/us-vm-lzbpt-fgcds
+    location: centralus
+    name: us-vm-lzbpt-fgcds
+    type: microsoft.compute/virtualmachines
+  - id: /subscriptions/f403a412-959c-4214-8c4d-ad5598f149cc/resourceGroups/us-vac-dr27h-ttsq5/providers/Microsoft.Compute/virtualMachines/us-vac-dr27h-t7dhd
+    location: centralus
+    name: us-vac-dr27h-t7dhd
+    type: microsoft.compute/virtualmachines
+  - id: /subscriptions/f403a412-959c-4214-8c4d-ad5598f149cc/resourceGroups/my-vm-mm59z/providers/Microsoft.Compute/virtualMachines/my-vm-jm8g2
+    location: swedencentral
+    name: my-vm-jm8g2
+    type: microsoft.compute/virtualmachines
+  - id: /subscriptions/f403a412-959c-4214-8c4d-ad5598f149cc/resourceGroups/javid-labs/providers/Microsoft.Compute/virtualMachines/devstack-test
+    location: westus2
+    name: devstack-test
+    type: microsoft.compute/virtualmachines
+```
+
+
+[azresourcegraph]: https://learn.microsoft.com/en-us/azure/governance/resource-graph/
+[azop]: https://marketplace.upbound.io/providers/upbound/provider-family-azure/latest
+[examples]: ./example

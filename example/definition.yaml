@@ -25,7 +25,9 @@ spec:
             properties:
               azResourceGraphQueryResult:
                 description: Freeform field containing query results from function-azresourcegraph
-                type: object
+                type: array
+                items:
+                  type: object
                 x-kubernetes-preserve-unknown-fields: true
         required:
         - spec
