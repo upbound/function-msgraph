@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
@@ -17,6 +16,7 @@ import (
 	"github.com/upboundcare/function-azresourcegraph/input/v1beta1"
 )
 
+// TargetXRStatusField is the target field to write the query result to
 const TargetXRStatusField = "status.azResourceGraphQueryResult"
 
 // Function returns whatever response you ask it to.
@@ -53,10 +53,6 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 		return rsp, nil
 	}
 
-	// Get and print secrets(TODO: remove)
-	for name, credential := range req.GetCredentials() {
-		fmt.Printf("Name: %s, Value: %s\n", name, string(credential.GetCredentialData().Data["credentials"]))
-	}
 	var azureCreds map[string]string
 	json.Unmarshal(req.GetCredentials()["azure-creds"].GetCredentialData().Data["credentials"], &azureCreds)
 
@@ -85,7 +81,7 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 	// Create the query request, Run the query and get the results. Update the VM and subscriptionID details below.
 	results, err := client.Resources(ctx,
 		armresourcegraph.QueryRequest{
-			Query: to.Ptr("Resources | project name, location, type, id| where type =~ 'Microsoft.Compute/virtualMachines' | order by name desc"),
+			Query: to.Ptr(in.Query),
 			Subscriptions: []*string{
 				to.Ptr(subscriptionID)},
 		},
@@ -93,11 +89,10 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 	if err != nil {
 		response.Fatal(rsp, errors.Wrap(err, "failed to finish the request"))
 		return rsp, nil
-	} else {
-		// Print the obtained query results
-		fmt.Printf("Resources found: " + strconv.FormatInt(*results.TotalRecords, 10) + "\n")
-		fmt.Printf("Results: " + fmt.Sprint(results.Data) + "\n")
 	}
+	// Print the obtained query results
+	f.log.Info("Query:", "query", in.Query)
+	f.log.Info("Results:", "results", fmt.Sprint(results.Data))
 
 	// The composite resource that actually exists.
 	oxr, err := request.GetObservedCompositeResource(req)

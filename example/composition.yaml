@@ -14,7 +14,7 @@ spec:
     input:
       apiVersion: azresourcegraph.fn.crossplane.io/v1alpha1
       kind: Input
-      query: "Hello world"
+      query: "Resources | project name, location, type, id| where type =~ 'Microsoft.Compute/virtualMachines' | order by name desc"
     credentials:
       - name: azure-creds
         source: Secret
