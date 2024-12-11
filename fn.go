@@ -102,6 +102,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		nil)
 	if err != nil {
 		response.Fatal(rsp, errors.Wrap(err, "failed to finish the request"))
+		f.log.Info("FAILURE: ", "failure", fmt.Sprint(err))
 		return rsp, nil
 	}
 	// Print the obtained query results
