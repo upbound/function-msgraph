@@ -32,14 +32,14 @@ func TestRunFunction(t *testing.T) {
 		want   want
 	}{
 		"ResponseIsReturned": {
-			reason: "The Function should return a fatal result if no input was specified",
+			reason: "The Function should return a fatal result if no credentials were specified",
 			args: args{
 				req: &fnv1.RunFunctionRequest{
 					Meta: &fnv1.RequestMeta{Tag: "hello"},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "azresourcegraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
-						"query": "Hello, world"
+						"query": "Resources| count"
 					}`),
 				},
 			},
@@ -48,17 +48,9 @@ func TestRunFunction(t *testing.T) {
 					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
 					Results: []*fnv1.Result{
 						{
-							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  "I was run with input \"Hello, world\"!",
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  "failed to obtain a credentials",
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
-						},
-					},
-					Conditions: []*fnv1.Condition{
-						{
-							Type:   "FunctionSuccess",
-							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
-							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 				},

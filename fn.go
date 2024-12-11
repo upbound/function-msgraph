@@ -54,7 +54,13 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 	}
 
 	var azureCreds map[string]string
-	json.Unmarshal(req.GetCredentials()["azure-creds"].GetCredentialData().Data["credentials"], &azureCreds)
+	rawCreds := req.GetCredentials()
+	if len(rawCreds) == 0 {
+		response.Fatal(rsp, errors.New("failed to obtain a credentials"))
+		return rsp, nil
+	}
+
+	json.Unmarshal(rawCreds["azure-creds"].GetCredentialData().Data["credentials"], &azureCreds)
 
 	tenantID := azureCreds["tenantId"]
 	clientID := azureCreds["clientId"]
@@ -93,6 +99,7 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 	// Print the obtained query results
 	f.log.Info("Query:", "query", in.Query)
 	f.log.Info("Results:", "results", fmt.Sprint(results.Data))
+	response.Normalf(rsp, "Query: %q", in.Query)
 
 	// The composite resource that actually exists.
 	oxr, err := request.GetObservedCompositeResource(req)
