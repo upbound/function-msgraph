@@ -49,7 +49,7 @@ func TestRunFunction(t *testing.T) {
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_FATAL,
-							Message:  "failed to obtain a credentials",
+							Message:  "failed to get azure-creds credentials",
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},

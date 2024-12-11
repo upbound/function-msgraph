@@ -8,12 +8,13 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resourcegraph/armresourcegraph"
+	"github.com/upboundcare/function-azresourcegraph/input/v1beta1"
+
 	"github.com/crossplane/crossplane-runtime/pkg/errors"
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
 	fnv1 "github.com/crossplane/function-sdk-go/proto/v1"
 	"github.com/crossplane/function-sdk-go/request"
 	"github.com/crossplane/function-sdk-go/response"
-	"github.com/upboundcare/function-azresourcegraph/input/v1beta1"
 )
 
 // TargetXRStatusField is the target field to write the query result to
@@ -27,7 +28,7 @@ type Function struct {
 }
 
 // RunFunction runs the Function.
-func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) (*fnv1.RunFunctionResponse, error) {
+func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest) (*fnv1.RunFunctionResponse, error) {
 	f.log.Info("Running function", "tag", req.GetMeta().GetTag())
 
 	rsp := response.To(req, response.DefaultTTL)
@@ -55,12 +56,20 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 
 	var azureCreds map[string]string
 	rawCreds := req.GetCredentials()
-	if len(rawCreds) == 0 {
-		response.Fatal(rsp, errors.New("failed to obtain a credentials"))
+
+	if credsData, ok := rawCreds["azure-creds"]; ok {
+		credsData := credsData.GetCredentialData().GetData()
+		if credsJSON, ok := credsData["credentials"]; ok {
+			err := json.Unmarshal(credsJSON, &azureCreds)
+			if err != nil {
+				response.Fatal(rsp, errors.Wrap(err, "cannot parse json credentials"))
+				return rsp, nil
+			}
+		}
+	} else {
+		response.Fatal(rsp, errors.New("failed to get azure-creds credentials"))
 		return rsp, nil
 	}
-
-	json.Unmarshal(rawCreds["azure-creds"].GetCredentialData().Data["credentials"], &azureCreds)
 
 	tenantID := azureCreds["tenantId"]
 	clientID := azureCreds["clientId"]
@@ -76,7 +85,6 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 		return rsp, nil
 	}
 
-	ctx := context.Background()
 	// Create and authorize a ResourceGraph client
 	client, err := armresourcegraph.NewClient(cred, nil)
 	if err != nil {
