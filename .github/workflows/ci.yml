@@ -164,4 +164,6 @@ jobs:
 
       - name: Push Multi-Platform Package to Upbound
         if: env.XPKG_ACCESS_ID != ''
+        # XPKG repo name can't contain uppercase characters
+        # See https://github.com/orgs/community/discussions/25768#discussioncomment-8057564 for XPKG@L lowercase explanation
         run: "./crossplane --verbose xpkg push --package-files $(echo *.xpkg|tr ' ' ,) ${XPKG@L}:${{ env.XPKG_VERSION }}"
