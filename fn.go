@@ -132,7 +132,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		return rsp, nil
 	}
 
-	err = dxr.Resource.SetValue(TargetXRStatusField, results.Data)
+	err = dxr.Resource.SetValue(TargetXRStatusField, &results.Data)
 	if err != nil {
 		response.Fatal(rsp, errors.Wrapf(err, "cannot set field %s to %s for %s", TargetXRStatusField, results.Data, dxr.Resource.GetKind()))
 		return rsp, nil
