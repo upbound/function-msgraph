@@ -94,8 +94,10 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 
 	queryRequest := armresourcegraph.QueryRequest{
 		Query: to.Ptr(in.Query),
-		Subscriptions: []*string{
-			to.Ptr(subscriptionID)},
+	}
+
+	if len(subscriptionID) > 0 {
+		queryRequest.Subscriptions = []*string{to.Ptr(subscriptionID)}
 	}
 
 	if len(in.ManagementGroups) > 0 {
