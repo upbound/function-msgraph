@@ -92,14 +92,18 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		return rsp, nil
 	}
 
-	// Create the query request, Run the query and get the results. Update the VM and subscriptionID details below.
-	results, err := client.Resources(ctx,
-		armresourcegraph.QueryRequest{
-			Query: to.Ptr(in.Query),
-			Subscriptions: []*string{
-				to.Ptr(subscriptionID)},
-		},
-		nil)
+	queryRequest := armresourcegraph.QueryRequest{
+		Query: to.Ptr(in.Query),
+		Subscriptions: []*string{
+			to.Ptr(subscriptionID)},
+	}
+
+	if len(in.ManagementGroups) > 0 {
+		queryRequest.ManagementGroups = in.ManagementGroups
+	}
+
+	// Create the query request, Run the query and get the results.
+	results, err := client.Resources(ctx, queryRequest, nil)
 	if err != nil {
 		response.Fatal(rsp, errors.Wrap(err, "failed to finish the request"))
 		f.log.Info("FAILURE: ", "failure", fmt.Sprint(err))

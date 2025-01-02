@@ -56,6 +56,32 @@ func TestRunFunction(t *testing.T) {
 				},
 			},
 		},
+		"ResponseIsReturnedWithOptionalManagementGroups": {
+			reason: "The Function should accept optional managmenetGroups input",
+			args: args{
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "azresourcegraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"query": "Resources| count",
+						"managementGroups": ["test"]
+					}`),
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  "failed to get azure-creds credentials",
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+				},
+			},
+		},
 	}
 
 	for name, tc := range cases {
