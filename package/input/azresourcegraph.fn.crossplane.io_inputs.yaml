@@ -36,6 +36,12 @@ spec:
               In CamelCase.
               More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
             type: string
+          managementGroups:
+            description: 'Azure management groups against which to execute the query.
+              Example: [ ''mg1'', ''mg2'' ]'
+            items:
+              type: string
+            type: array
           metadata:
             type: object
           query:
