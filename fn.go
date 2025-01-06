@@ -20,9 +20,16 @@ import (
 // TargetXRStatusField is the target field to write the query result to
 const TargetXRStatusField = "status.azResourceGraphQueryResult"
 
+// AzureQueryInterface defines the methods required for querying Azure resources.
+type AzureQueryInterface interface {
+	azQuery(ctx context.Context, azureCreds map[string]string, in *v1beta1.Input) (armresourcegraph.ClientResourcesResponse, error)
+}
+
 // Function returns whatever response you ask it to.
 type Function struct {
 	fnv1.UnimplementedFunctionRunnerServiceServer
+
+	azureQuery AzureQueryInterface
 
 	log logging.Logger
 }
@@ -54,60 +61,19 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		return rsp, nil
 	}
 
-	var azureCreds map[string]string
-	rawCreds := req.GetCredentials()
-
-	if credsData, ok := rawCreds["azure-creds"]; ok {
-		credsData := credsData.GetCredentialData().GetData()
-		if credsJSON, ok := credsData["credentials"]; ok {
-			err := json.Unmarshal(credsJSON, &azureCreds)
-			if err != nil {
-				response.Fatal(rsp, errors.Wrap(err, "cannot parse json credentials"))
-				return rsp, nil
-			}
-		}
-	} else {
-		response.Fatal(rsp, errors.New("failed to get azure-creds credentials"))
+	azureCreds, err := getCreds(req)
+	if err != nil {
+		response.Fatal(rsp, err)
 		return rsp, nil
 	}
 
-	tenantID := azureCreds["tenantId"]
-	clientID := azureCreds["clientId"]
-	clientSecret := azureCreds["clientSecret"]
-	subscriptionID := azureCreds["subscriptionId"]
+	if f.azureQuery == nil {
+		f.azureQuery = &AzureQuery{}
+	}
 
-	// To configure DefaultAzureCredential to authenticate a user-assigned managed identity,
-	// set the environment variable AZURE_CLIENT_ID to the identity's client ID.
-
-	cred, err := azidentity.NewClientSecretCredential(tenantID, clientID, clientSecret, nil)
+	results, err := f.azureQuery.azQuery(ctx, azureCreds, in)
 	if err != nil {
-		response.Fatal(rsp, errors.Wrap(err, "failed to obtain a credentials"))
-		return rsp, nil
-	}
-
-	// Create and authorize a ResourceGraph client
-	client, err := armresourcegraph.NewClient(cred, nil)
-	if err != nil {
-		response.Fatal(rsp, errors.Wrap(err, "failed to create client"))
-		return rsp, nil
-	}
-
-	queryRequest := armresourcegraph.QueryRequest{
-		Query: to.Ptr(in.Query),
-	}
-
-	if len(subscriptionID) > 0 {
-		queryRequest.Subscriptions = []*string{to.Ptr(subscriptionID)}
-	}
-
-	if len(in.ManagementGroups) > 0 {
-		queryRequest.ManagementGroups = in.ManagementGroups
-	}
-
-	// Create the query request, Run the query and get the results.
-	results, err := client.Resources(ctx, queryRequest, nil)
-	if err != nil {
-		response.Fatal(rsp, errors.Wrap(err, "failed to finish the request"))
+		response.Fatal(rsp, err)
 		f.log.Info("FAILURE: ", "failure", fmt.Sprint(err))
 		return rsp, nil
 	}
@@ -162,4 +128,67 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		TargetCompositeAndClaim()
 
 	return rsp, nil
+}
+
+func getCreds(req *fnv1.RunFunctionRequest) (map[string]string, error) {
+	var azureCreds map[string]string
+	rawCreds := req.GetCredentials()
+
+	if credsData, ok := rawCreds["azure-creds"]; ok {
+		credsData := credsData.GetCredentialData().GetData()
+		if credsJSON, ok := credsData["credentials"]; ok {
+			err := json.Unmarshal(credsJSON, &azureCreds)
+			if err != nil {
+				return nil, errors.Wrap(err, "cannot parse json credentials")
+			}
+		}
+	} else {
+		return nil, errors.New("failed to get azure-creds credentials")
+	}
+
+	return azureCreds, nil
+}
+
+// AzureQuery is a concrete implementation of the AzureQueryInterface
+// that interacts with Azure Resource Graph API.
+type AzureQuery struct{}
+
+func (a *AzureQuery) azQuery(ctx context.Context, azureCreds map[string]string, in *v1beta1.Input) (armresourcegraph.ClientResourcesResponse, error) {
+	tenantID := azureCreds["tenantId"]
+	clientID := azureCreds["clientId"]
+	clientSecret := azureCreds["clientSecret"]
+	subscriptionID := azureCreds["subscriptionId"]
+
+	// To configure DefaultAzureCredential to authenticate a user-assigned managed identity,
+	// set the environment variable AZURE_CLIENT_ID to the identity's client ID.
+
+	cred, err := azidentity.NewClientSecretCredential(tenantID, clientID, clientSecret, nil)
+	if err != nil {
+		return armresourcegraph.ClientResourcesResponse{}, errors.Wrap(err, "failed to obtain credentials")
+	}
+
+	// Create and authorize a ResourceGraph client
+	client, err := armresourcegraph.NewClient(cred, nil)
+	if err != nil {
+		return armresourcegraph.ClientResourcesResponse{}, errors.Wrap(err, "failed to create client")
+	}
+
+	queryRequest := armresourcegraph.QueryRequest{
+		Query: to.Ptr(in.Query),
+	}
+
+	if len(subscriptionID) > 0 {
+		queryRequest.Subscriptions = []*string{to.Ptr(subscriptionID)}
+	}
+
+	if len(in.ManagementGroups) > 0 {
+		queryRequest.ManagementGroups = in.ManagementGroups
+	}
+
+	// Create the query request, Run the query and get the results.
+	results, err := client.Resources(ctx, queryRequest, nil)
+	if err != nil {
+		return armresourcegraph.ClientResourcesResponse{}, errors.Wrap(err, "failed to finish the request")
+	}
+	return results, nil
 }
