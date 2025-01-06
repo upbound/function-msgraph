@@ -149,6 +149,8 @@ func getCreds(req *fnv1.RunFunctionRequest) (map[string]string, error) {
 	return azureCreds, nil
 }
 
+// AzureQuery is a concrete implementation of the AzureQueryInterface
+// that interacts with Azure Resource Graph API.
 type AzureQuery struct{}
 
 func (a *AzureQuery) azQuery(ctx context.Context, azureCreds map[string]string, in *v1beta1.Input) (armresourcegraph.ClientResourcesResponse, error) {
