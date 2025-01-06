@@ -20,8 +20,9 @@ import (
 // TargetXRStatusField is the target field to write the query result to
 const TargetXRStatusField = "status.azResourceGraphQueryResult"
 
+// AzureQueryInterface defines the methods required for querying Azure resources.
 type AzureQueryInterface interface {
-	azQuery(ctx context.Context, req *fnv1.RunFunctionRequest, azureCreds map[string]string, in *v1beta1.Input) (armresourcegraph.ClientResourcesResponse, error)
+	azQuery(ctx context.Context, azureCreds map[string]string, in *v1beta1.Input) (armresourcegraph.ClientResourcesResponse, error)
 }
 
 // Function returns whatever response you ask it to.
@@ -66,7 +67,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		return rsp, nil
 	}
 
-	results, err := f.azureQuery.azQuery(ctx, req, azureCreds, in)
+	results, err := f.azureQuery.azQuery(ctx, azureCreds, in)
 	if err != nil {
 		response.Fatal(rsp, err)
 		f.log.Info("FAILURE: ", "failure", fmt.Sprint(err))
@@ -144,7 +145,7 @@ func getCreds(req *fnv1.RunFunctionRequest) (map[string]string, error) {
 	return azureCreds, nil
 }
 
-func (f *Function) azQuery(ctx context.Context, req *fnv1.RunFunctionRequest, azureCreds map[string]string, in *v1beta1.Input) (armresourcegraph.ClientResourcesResponse, error) {
+func (f *Function) azQuery(ctx context.Context, azureCreds map[string]string, in *v1beta1.Input) (armresourcegraph.ClientResourcesResponse, error) {
 	tenantID := azureCreds["tenantId"]
 	clientID := azureCreds["clientId"]
 	clientSecret := azureCreds["clientSecret"]
