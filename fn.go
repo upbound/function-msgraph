@@ -81,7 +81,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 
 	cred, err := azidentity.NewClientSecretCredential(tenantID, clientID, clientSecret, nil)
 	if err != nil {
-		response.Fatal(rsp, errors.Wrap(err, "failed to obtain a credentials"))
+		response.Fatal(rsp, errors.Wrap(err, "failed to obtain credentials"))
 		return rsp, nil
 	}
 
