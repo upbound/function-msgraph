@@ -54,20 +54,9 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		return rsp, nil
 	}
 
-	var azureCreds map[string]string
-	rawCreds := req.GetCredentials()
-
-	if credsData, ok := rawCreds["azure-creds"]; ok {
-		credsData := credsData.GetCredentialData().GetData()
-		if credsJSON, ok := credsData["credentials"]; ok {
-			err := json.Unmarshal(credsJSON, &azureCreds)
-			if err != nil {
-				response.Fatal(rsp, errors.Wrap(err, "cannot parse json credentials"))
-				return rsp, nil
-			}
-		}
-	} else {
-		response.Fatal(rsp, errors.New("failed to get azure-creds credentials"))
+	azureCreds, err := getCreds(req)
+	if err != nil {
+		response.Fatal(rsp, err)
 		return rsp, nil
 	}
 
@@ -162,4 +151,23 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		TargetCompositeAndClaim()
 
 	return rsp, nil
+}
+
+func getCreds(req *fnv1.RunFunctionRequest) (map[string]string, error) {
+	var azureCreds map[string]string
+	rawCreds := req.GetCredentials()
+
+	if credsData, ok := rawCreds["azure-creds"]; ok {
+		credsData := credsData.GetCredentialData().GetData()
+		if credsJSON, ok := credsData["credentials"]; ok {
+			err := json.Unmarshal(credsJSON, &azureCreds)
+			if err != nil {
+				return nil, errors.Wrap(err, "cannot parse json credentials")
+			}
+		}
+	} else {
+		return nil, errors.New("failed to get azure-creds credentials")
+	}
+
+	return azureCreds, nil
 }
