@@ -67,6 +67,10 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		return rsp, nil
 	}
 
+	if f.azureQuery == nil {
+		f.azureQuery = &AzureQuery{}
+	}
+
 	results, err := f.azureQuery.azQuery(ctx, azureCreds, in)
 	if err != nil {
 		response.Fatal(rsp, err)
@@ -145,7 +149,9 @@ func getCreds(req *fnv1.RunFunctionRequest) (map[string]string, error) {
 	return azureCreds, nil
 }
 
-func (f *Function) azQuery(ctx context.Context, azureCreds map[string]string, in *v1beta1.Input) (armresourcegraph.ClientResourcesResponse, error) {
+type AzureQuery struct{}
+
+func (a *AzureQuery) azQuery(ctx context.Context, azureCreds map[string]string, in *v1beta1.Input) (armresourcegraph.ClientResourcesResponse, error) {
 	tenantID := azureCreds["tenantId"]
 	clientID := azureCreds["clientId"]
 	clientSecret := azureCreds["clientSecret"]
