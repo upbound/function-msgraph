@@ -17,9 +17,6 @@ import (
 	"github.com/crossplane/function-sdk-go/response"
 )
 
-// TargetXRStatusField is the target field to write the query result to
-const TargetXRStatusField = "status.azResourceGraphQueryResult"
-
 // AzureQueryInterface defines the methods required for querying Azure resources.
 type AzureQueryInterface interface {
 	azQuery(ctx context.Context, azureCreds map[string]string, in *v1beta1.Input) (armresourcegraph.ClientResourcesResponse, error)
@@ -103,6 +100,8 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		response.Fatal(rsp, errors.Wrapf(err, "cannot get desired composed resources from %T", req))
 		return rsp, nil
 	}
+
+	TargetXRStatusField := in.Target
 
 	err = dxr.Resource.SetValue(TargetXRStatusField, &results.Data)
 	if err != nil {

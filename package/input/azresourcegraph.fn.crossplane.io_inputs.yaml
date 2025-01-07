@@ -47,8 +47,12 @@ spec:
           query:
             description: Query to Azure Resource Graph API
             type: string
+          target:
+            description: Target where to store the Query Result
+            type: string
         required:
         - query
+        - target
         type: object
     served: true
     storage: true

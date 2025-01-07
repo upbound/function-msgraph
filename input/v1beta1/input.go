@@ -24,7 +24,11 @@ type Input struct {
 
 	// Query to Azure Resource Graph API
 	Query string `json:"query"`
+
 	// Azure management groups against which to execute the query. Example: [ 'mg1', 'mg2' ]
 	// +optional
 	ManagementGroups []*string `json:"managementGroups,omitempty"`
+
+	// Target where to store the Query Result
+	Target string `json:"target"`
 }

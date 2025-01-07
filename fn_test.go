@@ -117,7 +117,8 @@ func TestRunFunction(t *testing.T) {
 						"apiVersion": "azresourcegraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
 						"query": "Resources| count",
-						"managementGroups": ["test"]
+						"managementGroups": ["test"],
+						"target": "status.azResourceGraphQueryResult"
 					}`),
 					Observed: &fnv1.State{
 						Composite: &fnv1.Resource{
