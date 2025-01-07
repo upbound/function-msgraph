@@ -252,14 +252,6 @@ func TestRunFunction(t *testing.T) {
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
-					Desired: &fnv1.State{
-						Composite: &fnv1.Resource{
-							Resource: resource.MustStructJSON(`{
-"apiVersion": "example.org/v1",
-"kind": "XR"
-}`),
-						},
-					},
 					Context: resource.MustStructJSON(
 						`{
 							"azResourceGraphQueryResult":[
