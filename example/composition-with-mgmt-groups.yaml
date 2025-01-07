@@ -16,6 +16,7 @@ spec:
       kind: Input
       query: "Resources | project name, location, type, id| where type =~ 'Microsoft.Compute/virtualMachines' | order by name desc"
       managementGroups: ["example"]
+      target: "status.azResourceGraphQueryResult"
     credentials:
       - name: azure-creds
         source: Secret
