@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
@@ -101,11 +102,18 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		return rsp, nil
 	}
 
-	TargetXRStatusField := in.Target
-
-	err = dxr.Resource.SetValue(TargetXRStatusField, &results.Data)
-	if err != nil {
-		response.Fatal(rsp, errors.Wrapf(err, "cannot set field %s to %s for %s", TargetXRStatusField, results.Data, dxr.Resource.GetKind()))
+	switch {
+	case strings.HasPrefix(in.Target, "status."):
+		TargetXRStatusField := in.Target
+		err = dxr.Resource.SetValue(TargetXRStatusField, &results.Data)
+		if err != nil {
+			response.Fatal(rsp, errors.Wrapf(err, "cannot set field %s to %s for %s", TargetXRStatusField, results.Data, dxr.Resource.GetKind()))
+			return rsp, nil
+		}
+	case strings.HasPrefix(in.Target, "context."):
+		return rsp, nil
+	default:
+		response.Fatal(rsp, errors.Errorf("Unrecognized target field: %s", in.Target))
 		return rsp, nil
 	}
 
