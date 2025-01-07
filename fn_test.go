@@ -155,11 +155,10 @@ func TestRunFunction(t *testing.T) {
 "apiVersion": "example.org/v1",
 "kind": "XR",
 "status": {
-	"azResourceGraphQueryResult": [
+	"azResourceGraphQueryResult":
 		{
 			"resource": "mock-resource"
 		}
-	]
 }}`),
 						},
 					},
@@ -254,11 +253,10 @@ func TestRunFunction(t *testing.T) {
 					},
 					Context: resource.MustStructJSON(
 						`{
-							"azResourceGraphQueryResult":[
+							"azResourceGraphQueryResult":
 								{
 									"resource": "mock-resource"
 								}
-							]
 						  }`,
 					),
 				},
@@ -274,7 +272,7 @@ func TestRunFunction(t *testing.T) {
 					return armresourcegraph.ClientResourcesResponse{
 						QueryResponse: armresourcegraph.QueryResponse{
 							Count:           to.Ptr(int64(1)),
-							Data:            []map[string]interface{}{{"resource": "mock-resource"}}, // Mock data
+							Data:            map[string]interface{}{"resource": "mock-resource"}, // Mock data
 							ResultTruncated: to.Ptr(armresourcegraph.ResultTruncatedFalse),
 							TotalRecords:    to.Ptr(int64(1)),
 							Facets:          nil,
