@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resourcegraph/armresourcegraph"
 	"github.com/upboundcare/function-azresourcegraph/input/v1beta1"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/crossplane/crossplane-runtime/pkg/errors"
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
@@ -79,43 +81,43 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 	f.log.Info("Results:", "results", fmt.Sprint(results.Data))
 	response.Normalf(rsp, "Query: %q", in.Query)
 
-	// The composite resource that actually exists.
-	oxr, err := request.GetObservedCompositeResource(req)
-	if err != nil {
-		response.Fatal(rsp, errors.Wrap(err, "cannot get observed composite resource"))
-		return rsp, nil
-	}
-
-	// The composite resource desired by previous functions in the pipeline.
-	dxr, err := request.GetDesiredCompositeResource(req)
-	if err != nil {
-		response.Fatal(rsp, errors.Wrap(err, "cannot get desired composite resource"))
-		return rsp, nil
-	}
-	dxr.Resource.SetAPIVersion(oxr.Resource.GetAPIVersion())
-	dxr.Resource.SetKind(oxr.Resource.GetKind())
-	// The composed resources desired by any previous Functions in the pipeline.
-	desired, err := request.GetDesiredComposedResources(req)
-	if err != nil {
-		response.Fatal(rsp, errors.Wrapf(err, "cannot get desired composed resources from %T", req))
-		return rsp, nil
-	}
-
-	TargetXRStatusField := in.Target
-
-	err = dxr.Resource.SetValue(TargetXRStatusField, &results.Data)
-	if err != nil {
-		response.Fatal(rsp, errors.Wrapf(err, "cannot set field %s to %s for %s", TargetXRStatusField, results.Data, dxr.Resource.GetKind()))
-		return rsp, nil
-	}
-
-	if err := response.SetDesiredCompositeResource(rsp, dxr); err != nil {
-		response.Fatal(rsp, errors.Wrapf(err, "cannot set desired composite resource in %T", rsp))
-		return rsp, nil
-	}
-
-	if err := response.SetDesiredComposedResources(rsp, desired); err != nil {
-		response.Fatal(rsp, errors.Wrapf(err, "cannot set desired composed resources in %T", rsp))
+	switch {
+	case strings.HasPrefix(in.Target, "status."):
+		// The composite resource that actually exists.
+		oxr, err := request.GetObservedCompositeResource(req)
+		if err != nil {
+			response.Fatal(rsp, errors.Wrap(err, "cannot get observed composite resource"))
+			return rsp, nil
+		}
+		// The composite resource desired by previous functions in the pipeline.
+		dxr, err := request.GetDesiredCompositeResource(req)
+		if err != nil {
+			response.Fatal(rsp, errors.Wrap(err, "cannot get desired composite resource"))
+			return rsp, nil
+		}
+		dxr.Resource.SetAPIVersion(oxr.Resource.GetAPIVersion())
+		dxr.Resource.SetKind(oxr.Resource.GetKind())
+		TargetXRStatusField := in.Target
+		err = dxr.Resource.SetValue(TargetXRStatusField, &results.Data)
+		if err != nil {
+			response.Fatal(rsp, errors.Wrapf(err, "cannot set field %s to %s for %s", TargetXRStatusField, results.Data, dxr.Resource.GetKind()))
+			return rsp, nil
+		}
+		if err := response.SetDesiredCompositeResource(rsp, dxr); err != nil {
+			response.Fatal(rsp, errors.Wrapf(err, "cannot set desired composite resource in %T", rsp))
+			return rsp, nil
+		}
+	case strings.HasPrefix(in.Target, "context."):
+		contextField := strings.TrimPrefix(in.Target, "context.")
+		data, err := structpb.NewValue(results.Data)
+		if err != nil {
+			response.Fatal(rsp, errors.Wrap(err, "cannot convert results data to structpb.Value"))
+			return rsp, nil
+		}
+		f.log.Debug("Updating Composition environment", "key", contextField, "data", &results.Data)
+		response.SetContextKey(rsp, contextField, data)
+	default:
+		response.Fatal(rsp, errors.Errorf("Unrecognized target field: %s", in.Target))
 		return rsp, nil
 	}
 

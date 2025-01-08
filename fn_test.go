@@ -156,14 +156,110 @@ func TestRunFunction(t *testing.T) {
 "apiVersion": "example.org/v1",
 "kind": "XR",
 "status": {
-	"azResourceGraphQueryResult": [
+	"azResourceGraphQueryResult":
 		{
 			"resource": "mock-resource"
 		}
-	]
 }}`),
 						},
 					},
+				},
+			},
+		},
+		"ShouldFailWithUnsupportedTarget": {
+			reason: "The Function fail in case of unsupported value in Target Field",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "azresourcegraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"query": "Resources| count",
+						"managementGroups": ["test"],
+						"target": "notcool.azResourceGraphQueryResult"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `Query: "Resources| count"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+						{
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  "Unrecognized target field: notcool.azResourceGraphQueryResult",
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+				},
+			},
+		},
+		"ShouldUpdateContexField": {
+			reason: "The Function should update Context Field",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "azresourcegraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"query": "Resources| count",
+						"managementGroups": ["test"],
+						"target": "context.azResourceGraphQueryResult"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `Query: "Resources| count"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Context: resource.MustStructJSON(
+						`{
+							"azResourceGraphQueryResult":
+								{
+									"resource": "mock-resource"
+								}
+						  }`,
+					),
 				},
 			},
 		},
@@ -177,7 +273,7 @@ func TestRunFunction(t *testing.T) {
 					return armresourcegraph.ClientResourcesResponse{
 						QueryResponse: armresourcegraph.QueryResponse{
 							Count:           to.Ptr(int64(1)),
-							Data:            []map[string]interface{}{{"resource": "mock-resource"}}, // Mock data
+							Data:            map[string]interface{}{"resource": "mock-resource"}, // Mock data
 							ResultTruncated: to.Ptr(armresourcegraph.ResultTruncatedFalse),
 							TotalRecords:    to.Ptr(int64(1)),
 							Facets:          nil,
