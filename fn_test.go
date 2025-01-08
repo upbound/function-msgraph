@@ -6,15 +6,16 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resourcegraph/armresourcegraph"
-	"github.com/crossplane/crossplane-runtime/pkg/logging"
-	fnv1 "github.com/crossplane/function-sdk-go/proto/v1"
-	"github.com/crossplane/function-sdk-go/resource"
-	"github.com/crossplane/function-sdk-go/response"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/upboundcare/function-azresourcegraph/input/v1beta1"
 	"google.golang.org/protobuf/testing/protocmp"
 	"google.golang.org/protobuf/types/known/durationpb"
+
+	"github.com/crossplane/crossplane-runtime/pkg/logging"
+	fnv1 "github.com/crossplane/function-sdk-go/proto/v1"
+	"github.com/crossplane/function-sdk-go/resource"
+	"github.com/crossplane/function-sdk-go/response"
 )
 
 type MockAzureQuery struct {
