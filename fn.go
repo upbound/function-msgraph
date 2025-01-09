@@ -74,8 +74,9 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 	case in.QueryRef == nil:
 	case strings.HasPrefix(*in.QueryRef, "status."):
 	case strings.HasPrefix(*in.QueryRef, "context."):
-		if queryFromContext, ok := request.GetContextKey(req, strings.TrimPrefix(*in.QueryRef, "context.")); ok {
-			in.Query = queryFromContext.GetStringValue()
+		functionContext := req.GetContext().AsMap()
+		if queryFromContext, ok := GetNestedContextKey(functionContext, strings.TrimPrefix(*in.QueryRef, "context.")); ok {
+			in.Query = queryFromContext
 		}
 	default:
 		response.Fatal(rsp, errors.Errorf("Unrecognized QueryRef field: %s", *in.QueryRef))
@@ -204,4 +205,30 @@ func (a *AzureQuery) azQuery(ctx context.Context, azureCreds map[string]string, 
 		return armresourcegraph.ClientResourcesResponse{}, errors.Wrap(err, "failed to finish the request")
 	}
 	return results, nil
+}
+
+// GetNestedContextKey retrieves a nested string value from a map using dot notation keys.
+func GetNestedContextKey(context map[string]interface{}, key string) (string, bool) {
+	keys := strings.Split(key, ".")
+	currentValue := interface{}(context)
+
+	for _, k := range keys {
+		// Check if the current value is a map
+		if nestedMap, ok := currentValue.(map[string]interface{}); ok {
+			// Get the next value in the nested map
+			if nextValue, exists := nestedMap[k]; exists {
+				currentValue = nextValue
+			} else {
+				return "", false
+			}
+		} else {
+			return "", false
+		}
+	}
+
+	// Convert the final value to a string
+	if result, ok := currentValue.(string); ok {
+		return result, true
+	}
+	return "", false
 }
