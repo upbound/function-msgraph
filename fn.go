@@ -99,6 +99,12 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		return rsp, nil
 	}
 
+	if in.Query == "" {
+		response.Fatal(rsp, errors.New("Query is empty"))
+		f.log.Info("FAILURE: ", "query is empty", in.Query)
+		return rsp, nil
+	}
+
 	results, err := f.azureQuery.azQuery(ctx, azureCreds, in)
 	if err != nil {
 		response.Fatal(rsp, err)
