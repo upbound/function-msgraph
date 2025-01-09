@@ -153,14 +153,14 @@ func TestRunFunction(t *testing.T) {
 					Desired: &fnv1.State{
 						Composite: &fnv1.Resource{
 							Resource: resource.MustStructJSON(`{
-"apiVersion": "example.org/v1",
-"kind": "XR",
-"status": {
-	"azResourceGraphQueryResult":
-		{
-			"resource": "mock-resource"
-		}
-}}`),
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"status": {
+									"azResourceGraphQueryResult":
+										{
+											"resource": "mock-resource"
+										}
+								}}`),
 						},
 					},
 				},
