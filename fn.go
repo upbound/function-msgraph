@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
@@ -209,7 +210,20 @@ func (a *AzureQuery) azQuery(ctx context.Context, azureCreds map[string]string, 
 
 // GetNestedContextKey retrieves a nested string value from a map using dot notation keys.
 func GetNestedContextKey(context map[string]interface{}, key string) (string, bool) {
-	keys := strings.Split(key, ".")
+	// Regular expression to extract keys, supporting both dot and bracket notation
+	keyRegex := regexp.MustCompile(`\[([^\[\]]+)\]|([^.\[\]]+)`)
+	matches := keyRegex.FindAllStringSubmatch(key, -1)
+
+	// Extract all keys in the proper order
+	var keys []string
+	for _, match := range matches {
+		if match[1] != "" {
+			keys = append(keys, match[1]) // Bracket key
+		} else if match[2] != "" {
+			keys = append(keys, match[2]) // Dot key
+		}
+	}
+	// keys := strings.Split(key, ".")
 	currentValue := interface{}(context)
 
 	for _, k := range keys {
