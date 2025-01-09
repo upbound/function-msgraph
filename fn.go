@@ -81,7 +81,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 			return rsp, nil
 		}
 		xrStatus := make(map[string]interface{})
-		oxr.Resource.GetValueInto("status", &xrStatus)
+		err = oxr.Resource.GetValueInto("status", &xrStatus)
 		if err != nil {
 			response.Fatal(rsp, errors.Wrap(err, "cannot get XR status"))
 			return rsp, nil
