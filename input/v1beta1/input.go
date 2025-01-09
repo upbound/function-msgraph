@@ -23,7 +23,13 @@ type Input struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	// Query to Azure Resource Graph API
-	Query string `json:"query"`
+	// +optional
+	Query string `json:"query,omitempty"`
+
+	// Reference to retrieve the query string (e.g., from status or context)
+	// Overrides Query field if used
+	// +optional
+	QueryRef *string `json:"queryRef,omitempty"`
 
 	// Azure management groups against which to execute the query. Example: [ 'mg1', 'mg2' ]
 	// +optional

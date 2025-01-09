@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
@@ -68,6 +69,19 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 
 	if f.azureQuery == nil {
 		f.azureQuery = &AzureQuery{}
+	}
+
+	switch {
+	case in.QueryRef == nil:
+	case strings.HasPrefix(*in.QueryRef, "status."):
+	case strings.HasPrefix(*in.QueryRef, "context."):
+		functionContext := req.GetContext().AsMap()
+		if queryFromContext, ok := GetNestedContextKey(functionContext, strings.TrimPrefix(*in.QueryRef, "context.")); ok {
+			in.Query = queryFromContext
+		}
+	default:
+		response.Fatal(rsp, errors.Errorf("Unrecognized QueryRef field: %s", *in.QueryRef))
+		return rsp, nil
 	}
 
 	results, err := f.azureQuery.azQuery(ctx, azureCreds, in)
@@ -192,4 +206,42 @@ func (a *AzureQuery) azQuery(ctx context.Context, azureCreds map[string]string, 
 		return armresourcegraph.ClientResourcesResponse{}, errors.Wrap(err, "failed to finish the request")
 	}
 	return results, nil
+}
+
+// GetNestedContextKey retrieves a nested string value from a map using dot notation keys.
+func GetNestedContextKey(context map[string]interface{}, key string) (string, bool) {
+	// Regular expression to extract keys, supporting both dot and bracket notation
+	keyRegex := regexp.MustCompile(`\[([^\[\]]+)\]|([^.\[\]]+)`)
+	matches := keyRegex.FindAllStringSubmatch(key, -1)
+
+	// Extract all keys in the proper order
+	var keys []string
+	for _, match := range matches {
+		if match[1] != "" {
+			keys = append(keys, match[1]) // Bracket key
+		} else if match[2] != "" {
+			keys = append(keys, match[2]) // Dot key
+		}
+	}
+	currentValue := interface{}(context)
+
+	for _, k := range keys {
+		// Check if the current value is a map
+		if nestedMap, ok := currentValue.(map[string]interface{}); ok {
+			// Get the next value in the nested map
+			if nextValue, exists := nestedMap[k]; exists {
+				currentValue = nextValue
+			} else {
+				return "", false
+			}
+		} else {
+			return "", false
+		}
+	}
+
+	// Convert the final value to a string
+	if result, ok := currentValue.(string); ok {
+		return result, true
+	}
+	return "", false
 }

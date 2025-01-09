@@ -9,3 +9,10 @@ metadata:
 spec:
   # This is ignored when using the Development runtime.
   package: function-azresourcegraph
+---
+apiVersion: pkg.crossplane.io/v1beta1
+kind: Function
+metadata:
+  name: crossplane-contrib-function-environment-configs
+spec:
+  package: xpkg.upbound.io/crossplane-contrib/function-environment-configs:v0.2.0
