@@ -74,6 +74,21 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 	switch {
 	case in.QueryRef == nil:
 	case strings.HasPrefix(*in.QueryRef, "status."):
+		// The composite resource that actually exists.
+		oxr, err := request.GetObservedCompositeResource(req)
+		if err != nil {
+			response.Fatal(rsp, errors.Wrap(err, "cannot get observed composite resource"))
+			return rsp, nil
+		}
+		xrStatus := make(map[string]interface{})
+		oxr.Resource.GetValueInto("status", &xrStatus)
+		if err != nil {
+			response.Fatal(rsp, errors.Wrap(err, "cannot get XR status"))
+			return rsp, nil
+		}
+		if queryFromXRStatus, ok := GetNestedContextKey(xrStatus, strings.TrimPrefix(*in.QueryRef, "status.")); ok {
+			in.Query = queryFromXRStatus
+		}
 	case strings.HasPrefix(*in.QueryRef, "context."):
 		functionContext := req.GetContext().AsMap()
 		if queryFromContext, ok := GetNestedContextKey(functionContext, strings.TrimPrefix(*in.QueryRef, "context.")); ok {

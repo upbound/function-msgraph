@@ -454,6 +454,124 @@ func TestRunFunction(t *testing.T) {
 				},
 			},
 		},
+		"CanGetQueryFromXRStatusKey": {
+			reason: "The Function should be able to get Query from the XR status field",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "azresourcegraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryRef": "status.azResourceGraphQuery",
+						"target": "context.azResourceGraphQueryResult"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"status": {
+									"azResourceGraphQuery": "QueryFromXRStatus"
+								}}`),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `Query: "QueryFromXRStatus"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Context: resource.MustStructJSON(
+						`{
+							"azResourceGraphQueryResult":
+								{
+									"resource": "mock-resource"
+								}
+						}`,
+					),
+				},
+			},
+		},
+		"CanGetQueryFromNestedXRStatusKey": {
+			reason: "The Function should be able to get Query from the nested XR status field",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "azresourcegraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryRef": "status.testKey.azResourceGraphQuery",
+						"target": "context.azResourceGraphQueryResult"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"status": {
+									"testKey": {
+										"azResourceGraphQuery": "QueryFromNestedXRStatus"
+									}
+								}}`),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `Query: "QueryFromNestedXRStatus"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Context: resource.MustStructJSON(
+						`{
+							"azResourceGraphQueryResult":
+								{
+									"resource": "mock-resource"
+								}
+						}`,
+					),
+				},
+			},
+		},
 	}
 
 	for name, tc := range cases {
