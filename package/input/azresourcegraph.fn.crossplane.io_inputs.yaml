@@ -47,11 +47,15 @@ spec:
           query:
             description: Query to Azure Resource Graph API
             type: string
+          queryRef:
+            description: |-
+              Reference to retrieve the query string (e.g., from status or context)
+              Overrides Query field if used
+            type: string
           target:
             description: Target where to store the Query Result
             type: string
         required:
-        - query
         - target
         type: object
     served: true

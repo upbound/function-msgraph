@@ -13,6 +13,11 @@ func (in *Input) DeepCopyInto(out *Input) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
 	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	if in.QueryRef != nil {
+		in, out := &in.QueryRef, &out.QueryRef
+		*out = new(string)
+		**out = **in
+	}
 	if in.ManagementGroups != nil {
 		in, out := &in.ManagementGroups, &out.ManagementGroups
 		*out = make([]*string, len(*in))

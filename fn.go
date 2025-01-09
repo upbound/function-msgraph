@@ -70,6 +70,18 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		f.azureQuery = &AzureQuery{}
 	}
 
+	switch {
+	case in.QueryRef == nil:
+	case strings.HasPrefix(*in.QueryRef, "status."):
+	case strings.HasPrefix(*in.QueryRef, "context."):
+		if queryFromContext, ok := request.GetContextKey(req, strings.TrimPrefix(*in.QueryRef, "context.")); ok {
+			in.Query = queryFromContext.GetStringValue()
+		}
+	default:
+		response.Fatal(rsp, errors.Errorf("Unrecognized QueryRef field: %s", *in.QueryRef))
+		return rsp, nil
+	}
+
 	results, err := f.azureQuery.azQuery(ctx, azureCreds, in)
 	if err != nil {
 		response.Fatal(rsp, err)
