@@ -223,7 +223,6 @@ func GetNestedContextKey(context map[string]interface{}, key string) (string, bo
 			keys = append(keys, match[2]) // Dot key
 		}
 	}
-	// keys := strings.Split(key, ".")
 	currentValue := interface{}(context)
 
 	for _, k := range keys {
