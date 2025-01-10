@@ -74,24 +74,14 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 	switch {
 	case in.QueryRef == nil:
 	case strings.HasPrefix(*in.QueryRef, "status."):
-		// The composite resource that actually exists.
-		oxr, err := request.GetObservedCompositeResource(req)
+		err := getQueryFromStatus(req, in)
 		if err != nil {
-			response.Fatal(rsp, errors.Wrap(err, "cannot get observed composite resource"))
+			response.Fatal(rsp, err)
 			return rsp, nil
-		}
-		xrStatus := make(map[string]interface{})
-		err = oxr.Resource.GetValueInto("status", &xrStatus)
-		if err != nil {
-			response.Fatal(rsp, errors.Wrap(err, "cannot get XR status"))
-			return rsp, nil
-		}
-		if queryFromXRStatus, ok := GetNestedContextKey(xrStatus, strings.TrimPrefix(*in.QueryRef, "status.")); ok {
-			in.Query = queryFromXRStatus
 		}
 	case strings.HasPrefix(*in.QueryRef, "context."):
 		functionContext := req.GetContext().AsMap()
-		if queryFromContext, ok := GetNestedContextKey(functionContext, strings.TrimPrefix(*in.QueryRef, "context.")); ok {
+		if queryFromContext, ok := GetNestedKey(functionContext, strings.TrimPrefix(*in.QueryRef, "context.")); ok {
 			in.Query = queryFromContext
 		}
 	default:
@@ -118,39 +108,17 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 
 	switch {
 	case strings.HasPrefix(in.Target, "status."):
-		// The composite resource that actually exists.
-		oxr, err := request.GetObservedCompositeResource(req)
+		err = putQueryResultToStatus(req, rsp, in, results, f)
 		if err != nil {
-			response.Fatal(rsp, errors.Wrap(err, "cannot get observed composite resource"))
-			return rsp, nil
-		}
-		// The composite resource desired by previous functions in the pipeline.
-		dxr, err := request.GetDesiredCompositeResource(req)
-		if err != nil {
-			response.Fatal(rsp, errors.Wrap(err, "cannot get desired composite resource"))
-			return rsp, nil
-		}
-		dxr.Resource.SetAPIVersion(oxr.Resource.GetAPIVersion())
-		dxr.Resource.SetKind(oxr.Resource.GetKind())
-		TargetXRStatusField := in.Target
-		err = dxr.Resource.SetValue(TargetXRStatusField, &results.Data)
-		if err != nil {
-			response.Fatal(rsp, errors.Wrapf(err, "cannot set field %s to %s for %s", TargetXRStatusField, results.Data, dxr.Resource.GetKind()))
-			return rsp, nil
-		}
-		if err := response.SetDesiredCompositeResource(rsp, dxr); err != nil {
-			response.Fatal(rsp, errors.Wrapf(err, "cannot set desired composite resource in %T", rsp))
+			response.Fatal(rsp, err)
 			return rsp, nil
 		}
 	case strings.HasPrefix(in.Target, "context."):
-		contextField := strings.TrimPrefix(in.Target, "context.")
-		data, err := structpb.NewValue(results.Data)
+		err = putQueryResultToContext(req, rsp, in, results, f)
 		if err != nil {
-			response.Fatal(rsp, errors.Wrap(err, "cannot convert results data to structpb.Value"))
+			response.Fatal(rsp, err)
 			return rsp, nil
 		}
-		f.log.Debug("Updating Composition environment", "key", contextField, "data", &results.Data)
-		response.SetContextKey(rsp, contextField, data)
 	default:
 		response.Fatal(rsp, errors.Errorf("Unrecognized target field: %s", in.Target))
 		return rsp, nil
@@ -229,24 +197,35 @@ func (a *AzureQuery) azQuery(ctx context.Context, azureCreds map[string]string, 
 	return results, nil
 }
 
-// GetNestedContextKey retrieves a nested string value from a map using dot notation keys.
-func GetNestedContextKey(context map[string]interface{}, key string) (string, bool) {
+// ParseNestedKey enables the bracket and dot notation to key reference
+func ParseNestedKey(key string) ([]string, error) {
+	var parts []string
 	// Regular expression to extract keys, supporting both dot and bracket notation
-	keyRegex := regexp.MustCompile(`\[([^\[\]]+)\]|([^.\[\]]+)`)
-	matches := keyRegex.FindAllStringSubmatch(key, -1)
-
-	// Extract all keys in the proper order
-	var keys []string
+	regex := regexp.MustCompile(`\[([^\[\]]+)\]|([^.\[\]]+)`)
+	matches := regex.FindAllStringSubmatch(key, -1)
 	for _, match := range matches {
 		if match[1] != "" {
-			keys = append(keys, match[1]) // Bracket key
+			parts = append(parts, match[1]) // Bracket notation
 		} else if match[2] != "" {
-			keys = append(keys, match[2]) // Dot key
+			parts = append(parts, match[2]) // Dot notation
 		}
 	}
-	currentValue := interface{}(context)
 
-	for _, k := range keys {
+	if len(parts) == 0 {
+		return nil, errors.New("invalid key")
+	}
+	return parts, nil
+}
+
+// GetNestedKey retrieves a nested string value from a map using dot notation keys.
+func GetNestedKey(context map[string]interface{}, key string) (string, bool) {
+	parts, err := ParseNestedKey(key)
+	if err != nil {
+		return "", false
+	}
+
+	currentValue := interface{}(context)
+	for _, k := range parts {
 		// Check if the current value is a map
 		if nestedMap, ok := currentValue.(map[string]interface{}); ok {
 			// Get the next value in the nested map
@@ -265,4 +244,120 @@ func GetNestedContextKey(context map[string]interface{}, key string) (string, bo
 		return result, true
 	}
 	return "", false
+}
+
+// SetNestedKey sets a value to a nested key from a map using dot notation keys.
+func SetNestedKey(root map[string]interface{}, key string, value interface{}) error {
+	parts, err := ParseNestedKey(key)
+	if err != nil {
+		return err
+	}
+
+	current := root
+	for i, part := range parts {
+		if i == len(parts)-1 {
+			// Set the value at the final key
+			current[part] = value
+			return nil
+		}
+
+		// Traverse into nested maps or create them if they don't exist
+		if next, exists := current[part]; exists {
+			if nextMap, ok := next.(map[string]interface{}); ok {
+				current = nextMap
+			} else {
+				return fmt.Errorf("key %q exists but is not a map", part)
+			}
+		} else {
+			// Create a new map if the path doesn't exist
+			newMap := make(map[string]interface{})
+			current[part] = newMap
+			current = newMap
+		}
+	}
+
+	return nil
+}
+
+func getQueryFromStatus(req *fnv1.RunFunctionRequest, in *v1beta1.Input) error {
+	oxr, err := request.GetObservedCompositeResource(req)
+	if err != nil {
+		return errors.Wrap(err, "cannot get observed composite resource")
+	}
+	xrStatus := make(map[string]interface{})
+	err = oxr.Resource.GetValueInto("status", &xrStatus)
+	if err != nil {
+		return errors.Wrap(err, "cannot get XR status")
+	}
+	if queryFromXRStatus, ok := GetNestedKey(xrStatus, strings.TrimPrefix(*in.QueryRef, "status.")); ok {
+		in.Query = queryFromXRStatus
+	}
+	return nil
+}
+
+func putQueryResultToStatus(req *fnv1.RunFunctionRequest, rsp *fnv1.RunFunctionResponse, in *v1beta1.Input, results armresourcegraph.ClientResourcesResponse, f *Function) error {
+	oxr, err := request.GetObservedCompositeResource(req)
+	if err != nil {
+		return errors.Wrap(err, "cannot get observed composite resource")
+	}
+	// The composite resource desired by previous functions in the pipeline.
+	dxr, err := request.GetDesiredCompositeResource(req)
+	if err != nil {
+		return errors.Wrap(err, "cannot get desired composite resource")
+	}
+	dxr.Resource.SetAPIVersion(oxr.Resource.GetAPIVersion())
+	dxr.Resource.SetKind(oxr.Resource.GetKind())
+
+	xrStatus := make(map[string]interface{})
+	err = oxr.Resource.GetValueInto("status", &xrStatus)
+	if err != nil {
+		f.log.Debug("Cannot get status from XR")
+	}
+
+	// Update the specific status field using the reusable function
+	statusField := strings.TrimPrefix(in.Target, "status.")
+	err = SetNestedKey(xrStatus, statusField, results.Data)
+	if err != nil {
+		return errors.Wrapf(err, "cannot set status field %s to %v", statusField, results.Data)
+	}
+
+	// Write the updated status field back into the composite resource
+	if err := dxr.Resource.SetValue("status", xrStatus); err != nil {
+		return errors.Wrap(err, "cannot write updated status back into composite resource")
+	}
+
+	// Save the updated desired composite resource
+	if err := response.SetDesiredCompositeResource(rsp, dxr); err != nil {
+		return errors.Wrapf(err, "cannot set desired composite resource in %T", rsp)
+	}
+	return nil
+}
+
+func putQueryResultToContext(req *fnv1.RunFunctionRequest, rsp *fnv1.RunFunctionResponse, in *v1beta1.Input, results armresourcegraph.ClientResourcesResponse, f *Function) error {
+
+	contextField := strings.TrimPrefix(in.Target, "context.")
+	data, err := structpb.NewValue(results.Data)
+	if err != nil {
+		return errors.Wrap(err, "cannot convert results data to structpb.Value")
+	}
+
+	// Convert existing context into a map[string]interface{}
+	contextMap := req.GetContext().AsMap()
+
+	err = SetNestedKey(contextMap, contextField, data.AsInterface())
+	if err != nil {
+		return errors.Wrap(err, "failed to update context key")
+	}
+
+	f.log.Debug("Updating Composition Pipeline Context", "key", contextField, "data", &results.Data)
+
+	// Convert the updated context back into structpb.Struct
+	updatedContext, err := structpb.NewStruct(contextMap)
+	if err != nil {
+		return errors.Wrap(err, "failed to serialize updated context")
+	}
+
+	// Set the updated context
+	rsp.Context = updatedContext
+	return nil
 }
