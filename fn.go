@@ -14,9 +14,11 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/crossplane/crossplane-runtime/pkg/errors"
+	"github.com/crossplane/crossplane-runtime/pkg/fieldpath"
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
 	fnv1 "github.com/crossplane/function-sdk-go/proto/v1"
 	"github.com/crossplane/function-sdk-go/request"
+	"github.com/crossplane/function-sdk-go/resource"
 	"github.com/crossplane/function-sdk-go/response"
 )
 
@@ -55,6 +57,11 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 
 	// Get query from reference if specified
 	if err := f.resolveQuery(req, in, rsp); err != nil {
+		return rsp, nil //nolint:nilerr // errors are handled in rsp. We should not error main function and proceed with reconciliation
+	}
+
+	// Get subscriptions from reference if specified
+	if err := f.resolveSubscriptions(req, in, rsp); err != nil {
 		return rsp, nil //nolint:nilerr // errors are handled in rsp. We should not error main function and proceed with reconciliation
 	}
 
@@ -131,7 +138,7 @@ func (f *Function) resolveQuery(req *fnv1.RunFunctionRequest, in *v1beta1.Input,
 	case in.QueryRef == nil:
 		return nil
 	case strings.HasPrefix(*in.QueryRef, "status."):
-		if err := getQueryFromStatus(req, in); err != nil {
+		if err := f.getQueryFromStatus(req, in); err != nil {
 			response.Fatal(rsp, err)
 			return err
 		}
@@ -147,71 +154,125 @@ func (f *Function) resolveQuery(req *fnv1.RunFunctionRequest, in *v1beta1.Input,
 	return nil
 }
 
-// isValidTarget checks if the target is valid
-func (f *Function) isValidTarget(target string) bool {
-	return strings.HasPrefix(target, "status.") || strings.HasPrefix(target, "context.")
-}
-
-// shouldSkipQuery checks if the query should be skipped.
-func (f *Function) shouldSkipQuery(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) bool {
-	// Determine if we should skip the query when target has data
-	var shouldSkipQueryWhenTargetHasData = false // Default to false to ensure continuous reconciliation
-	if in.SkipQueryWhenTargetHasData != nil {
-		shouldSkipQueryWhenTargetHasData = *in.SkipQueryWhenTargetHasData
-	}
-
-	if !shouldSkipQueryWhenTargetHasData {
-		return false
+// resolveSubscriptions resolves the subscriptions from a reference if specified.
+func (f *Function) resolveSubscriptions(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) error {
+	if in.SubscriptionsRef == nil {
+		return nil
 	}
 
 	switch {
-	case strings.HasPrefix(in.Target, "status."):
-		return f.checkStatusTargetHasData(req, in, rsp)
-	case strings.HasPrefix(in.Target, "context."):
-		return f.checkContextTargetHasData(req, in, rsp)
+	case strings.HasPrefix(*in.SubscriptionsRef, "status."):
+		if err := f.getSubscriptionsFromStatus(req, in); err != nil {
+			response.Fatal(rsp, err)
+			return err
+		}
+	case strings.HasPrefix(*in.SubscriptionsRef, "context."):
+		functionContext := req.GetContext().AsMap()
+		paved := fieldpath.Pave(functionContext)
+		value, err := paved.GetValue(strings.TrimPrefix(*in.SubscriptionsRef, "context."))
+		if err == nil && value != nil {
+			if arr, ok := value.([]interface{}); ok {
+				in.Subscriptions = make([]*string, len(arr))
+				for i, sub := range arr {
+					if strSub, ok := sub.(string); ok {
+						in.Subscriptions[i] = to.Ptr(strSub)
+					}
+				}
+			}
+		}
+	default:
+		response.Fatal(rsp, errors.Errorf("Unrecognized SubscriptionsRef field: %s", *in.SubscriptionsRef))
+		return errors.New("unrecognized SubscriptionsRef field")
+	}
+	return nil
+}
+
+// getXRAndStatus retrieves status and desired XR, handling initialization if needed
+func (f *Function) getXRAndStatus(req *fnv1.RunFunctionRequest) (map[string]interface{}, *resource.Composite, error) {
+	// Get both observed and desired XR
+	oxr, err := request.GetObservedCompositeResource(req)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "cannot get observed composite resource")
 	}
 
-	return false
+	dxr, err := request.GetDesiredCompositeResource(req)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "cannot get desired composite resource")
+	}
+
+	xrStatus := make(map[string]interface{})
+
+	// Initialize dxr from oxr if needed
+	if dxr.Resource.GetKind() == "" {
+		dxr.Resource.SetAPIVersion(oxr.Resource.GetAPIVersion())
+		dxr.Resource.SetKind(oxr.Resource.GetKind())
+		dxr.Resource.SetName(oxr.Resource.GetName())
+	}
+
+	// First try to get status from desired XR (pipeline changes)
+	if dxr.Resource.GetKind() != "" {
+		err = dxr.Resource.GetValueInto("status", &xrStatus)
+		if err == nil && len(xrStatus) > 0 {
+			return xrStatus, dxr, nil
+		}
+		f.log.Debug("Cannot get status from Desired XR or it's empty")
+	}
+
+	// Fallback to observed XR status
+	err = oxr.Resource.GetValueInto("status", &xrStatus)
+	if err != nil {
+		f.log.Debug("Cannot get status from Observed XR")
+	}
+
+	return xrStatus, dxr, nil
+}
+
+// getQueryFromStatus gets query from the XR status
+func (f *Function) getQueryFromStatus(req *fnv1.RunFunctionRequest, in *v1beta1.Input) error {
+	xrStatus, _, err := f.getXRAndStatus(req)
+	if err != nil {
+		return err
+	}
+
+	if queryFromXRStatus, ok := GetNestedKey(xrStatus, strings.TrimPrefix(*in.QueryRef, "status.")); ok {
+		in.Query = queryFromXRStatus
+	}
+	return nil
+}
+
+// getSubscriptionsFromStatus gets subscriptions from the XR status
+func (f *Function) getSubscriptionsFromStatus(req *fnv1.RunFunctionRequest, in *v1beta1.Input) error {
+	xrStatus, _, err := f.getXRAndStatus(req)
+	if err != nil {
+		return err
+	}
+
+	paved := fieldpath.Pave(xrStatus)
+	value, err := paved.GetValue(strings.TrimPrefix(*in.SubscriptionsRef, "status."))
+	if err == nil && value != nil {
+		if arr, ok := value.([]interface{}); ok {
+			in.Subscriptions = make([]*string, len(arr))
+			for i, sub := range arr {
+				if strSub, ok := sub.(string); ok {
+					in.Subscriptions[i] = to.Ptr(strSub)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // checkStatusTargetHasData checks if the status target has data.
 func (f *Function) checkStatusTargetHasData(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) bool {
-	oxr, err := request.GetObservedCompositeResource(req)
+	xrStatus, _, err := f.getXRAndStatus(req)
 	if err != nil {
-		response.Fatal(rsp, errors.Wrap(err, "cannot get observed composite resource"))
+		response.Fatal(rsp, err)
 		return true
 	}
 
-	xrStatus := make(map[string]interface{})
-	err = oxr.Resource.GetValueInto("status", &xrStatus)
-
-	if err == nil {
-		// Check if the target field already has data
-		statusField := strings.TrimPrefix(in.Target, "status.")
-
-		if hasData, _ := targetHasData(xrStatus, statusField); hasData {
-			f.log.Info("Target already has data, skipping query", "target", in.Target)
-
-			// Set success condition and return
-			response.ConditionTrue(rsp, "FunctionSkip", "SkippedQuery").
-				WithMessage("Target already has data, skipped query to avoid throttling").
-				TargetCompositeAndClaim()
-			return true
-		}
-	}
-
-	// If we got here, either there was an error or the field doesn't have data
-	return false
-}
-
-// checkContextTargetHasData checks if the context target has data.
-func (f *Function) checkContextTargetHasData(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) bool {
-	contextMap := req.GetContext().AsMap()
-	contextField := strings.TrimPrefix(in.Target, "context.")
-	if hasData, _ := targetHasData(contextMap, contextField); hasData {
+	statusField := strings.TrimPrefix(in.Target, "status.")
+	if hasData, _ := targetHasData(xrStatus, statusField); hasData {
 		f.log.Info("Target already has data, skipping query", "target", in.Target)
-
-		// Set success condition and return
 		response.ConditionTrue(rsp, "FunctionSkip", "SkippedQuery").
 			WithMessage("Target already has data, skipped query to avoid throttling").
 			TargetCompositeAndClaim()
@@ -241,7 +302,7 @@ func (f *Function) executeQuery(ctx context.Context, azureCreds map[string]strin
 func (f *Function) processResults(req *fnv1.RunFunctionRequest, in *v1beta1.Input, results armresourcegraph.ClientResourcesResponse, rsp *fnv1.RunFunctionResponse) error {
 	switch {
 	case strings.HasPrefix(in.Target, "status."):
-		err := putQueryResultToStatus(req, rsp, in, results, f)
+		err := f.putQueryResultToStatus(req, rsp, in, results)
 		if err != nil {
 			response.Fatal(rsp, err)
 			return err
@@ -411,51 +472,14 @@ func SetNestedKey(root map[string]interface{}, key string, value interface{}) er
 	return nil
 }
 
-func getQueryFromStatus(req *fnv1.RunFunctionRequest, in *v1beta1.Input) error {
-	oxr, err := request.GetObservedCompositeResource(req)
+// putQueryResultToStatus processes the query results to status
+func (f *Function) putQueryResultToStatus(req *fnv1.RunFunctionRequest, rsp *fnv1.RunFunctionResponse, in *v1beta1.Input, results armresourcegraph.ClientResourcesResponse) error {
+	xrStatus, dxr, err := f.getXRAndStatus(req)
 	if err != nil {
-		return errors.Wrap(err, "cannot get observed composite resource")
-	}
-	xrStatus := make(map[string]interface{})
-	err = oxr.Resource.GetValueInto("status", &xrStatus)
-	if err != nil {
-		return errors.Wrap(err, "cannot get XR status")
-	}
-	if queryFromXRStatus, ok := GetNestedKey(xrStatus, strings.TrimPrefix(*in.QueryRef, "status.")); ok {
-		in.Query = queryFromXRStatus
-	}
-	return nil
-}
-
-func putQueryResultToStatus(req *fnv1.RunFunctionRequest, rsp *fnv1.RunFunctionResponse, in *v1beta1.Input, results armresourcegraph.ClientResourcesResponse, f *Function) error {
-	oxr, err := request.GetObservedCompositeResource(req)
-	if err != nil {
-		return errors.Wrap(err, "cannot get observed composite resource")
-	}
-	// The composite resource desired by previous functions in the pipeline.
-	dxr, err := request.GetDesiredCompositeResource(req)
-	if err != nil {
-		return errors.Wrap(err, "cannot get desired composite resource")
-	}
-	xrStatus := make(map[string]interface{})
-	// Use Desired XR from previous pipeline as the current status
-	// Otherwise get status from Observed XR
-	if dxr.Resource.GetKind() != "" {
-		err = dxr.Resource.GetValueInto("status", &xrStatus)
-		if err != nil {
-			f.log.Debug("Cannot get status from XR")
-		}
-	} else {
-		dxr.Resource.SetAPIVersion(oxr.Resource.GetAPIVersion())
-		dxr.Resource.SetKind(oxr.Resource.GetKind())
-
-		err = oxr.Resource.GetValueInto("status", &xrStatus)
-		if err != nil {
-			f.log.Debug("Cannot get status from XR")
-		}
+		return err
 	}
 
-	// Update the specific status field using the reusable function
+	// Update the specific status field
 	statusField := strings.TrimPrefix(in.Target, "status.")
 	err = SetNestedKey(xrStatus, statusField, results.Data)
 	if err != nil {
@@ -554,35 +578,17 @@ func targetHasData(data map[string]interface{}, key string) (bool, error) {
 
 // propagateDesiredXR ensures the desired XR is properly propagated without changing existing data
 func (f *Function) propagateDesiredXR(req *fnv1.RunFunctionRequest, rsp *fnv1.RunFunctionResponse) error {
-	oxr, err := request.GetObservedCompositeResource(req)
+	xrStatus, dxr, err := f.getXRAndStatus(req)
 	if err != nil {
-		response.Fatal(rsp, errors.Wrap(err, "cannot get observed composite resource"))
+		response.Fatal(rsp, err)
 		return err
 	}
 
-	// The composite resource desired by previous functions in the pipeline
-	dxr, err := request.GetDesiredCompositeResource(req)
-	if err != nil {
-		response.Fatal(rsp, errors.Wrap(err, "cannot get desired composite resource"))
-		return err
-	}
-
-	// If dxr is empty, initialize it from oxr
-	if dxr.Resource.GetKind() == "" {
-		f.log.Info("Initializing Desired XR from Observed XR")
-		dxr.Resource.SetAPIVersion(oxr.Resource.GetAPIVersion())
-		dxr.Resource.SetKind(oxr.Resource.GetKind())
-		dxr.Resource.SetName(oxr.Resource.GetName())
-
-		// Copy status from observed XR
-		xrStatus := make(map[string]interface{})
-		err = oxr.Resource.GetValueInto("status", &xrStatus)
-		if err == nil && len(xrStatus) > 0 {
-			f.log.Info("Copying status from Observed XR to Desired XR")
-			if err := dxr.Resource.SetValue("status", xrStatus); err != nil {
-				f.log.Info("Error setting status in Desired XR", "error", err)
-				return err
-			}
+	// Write any existing status back to dxr
+	if len(xrStatus) > 0 {
+		if err := dxr.Resource.SetValue("status", xrStatus); err != nil {
+			f.log.Info("Error setting status in Desired XR", "error", err)
+			return err
 		}
 	}
 
@@ -605,4 +611,47 @@ func (f *Function) preserveContext(req *fnv1.RunFunctionRequest, rsp *fnv1.RunFu
 		rsp.Context = existingContext
 		f.log.Info("Preserved existing context in response")
 	}
+}
+
+// isValidTarget checks if the target is valid
+func (f *Function) isValidTarget(target string) bool {
+	return strings.HasPrefix(target, "status.") || strings.HasPrefix(target, "context.")
+}
+
+// shouldSkipQuery checks if the query should be skipped.
+func (f *Function) shouldSkipQuery(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) bool {
+	// Determine if we should skip the query when target has data
+	var shouldSkipQueryWhenTargetHasData = false // Default to false to ensure continuous reconciliation
+	if in.SkipQueryWhenTargetHasData != nil {
+		shouldSkipQueryWhenTargetHasData = *in.SkipQueryWhenTargetHasData
+	}
+
+	if !shouldSkipQueryWhenTargetHasData {
+		return false
+	}
+
+	switch {
+	case strings.HasPrefix(in.Target, "status."):
+		return f.checkStatusTargetHasData(req, in, rsp)
+	case strings.HasPrefix(in.Target, "context."):
+		return f.checkContextTargetHasData(req, in, rsp)
+	}
+
+	return false
+}
+
+// checkContextTargetHasData checks if the context target has data.
+func (f *Function) checkContextTargetHasData(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) bool {
+	contextMap := req.GetContext().AsMap()
+	contextField := strings.TrimPrefix(in.Target, "context.")
+	if hasData, _ := targetHasData(contextMap, contextField); hasData {
+		f.log.Info("Target already has data, skipping query", "target", in.Target)
+
+		// Set success condition and return
+		response.ConditionTrue(rsp, "FunctionSkip", "SkippedQuery").
+			WithMessage("Target already has data, skipped query to avoid throttling").
+			TargetCompositeAndClaim()
+		return true
+	}
+	return false
 }
