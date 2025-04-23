@@ -13,13 +13,56 @@ func (in *Input) DeepCopyInto(out *Input) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
 	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	if in.Users != nil {
+		in, out := &in.Users, &out.Users
+		*out = make([]*string, len(*in))
+		for i := range *in {
+			if (*in)[i] != nil {
+				in, out := &(*in)[i], &(*out)[i]
+				*out = new(string)
+				**out = **in
+			}
+		}
+	}
+	if in.Groups != nil {
+		in, out := &in.Groups, &out.Groups
+		*out = make([]*string, len(*in))
+		for i := range *in {
+			if (*in)[i] != nil {
+				in, out := &(*in)[i], &(*out)[i]
+				*out = new(string)
+				**out = **in
+			}
+		}
+	}
+	if in.Group != nil {
+		in, out := &in.Group, &out.Group
+		*out = new(string)
+		**out = **in
+	}
+	if in.ServicePrincipals != nil {
+		in, out := &in.ServicePrincipals, &out.ServicePrincipals
+		*out = make([]*string, len(*in))
+		for i := range *in {
+			if (*in)[i] != nil {
+				in, out := &(*in)[i], &(*out)[i]
+				*out = new(string)
+				**out = **in
+			}
+		}
+	}
+	if in.CustomQuery != nil {
+		in, out := &in.CustomQuery, &out.CustomQuery
+		*out = new(string)
+		**out = **in
+	}
 	if in.QueryRef != nil {
 		in, out := &in.QueryRef, &out.QueryRef
 		*out = new(string)
 		**out = **in
 	}
-	if in.ManagementGroups != nil {
-		in, out := &in.ManagementGroups, &out.ManagementGroups
+	if in.SelectFields != nil {
+		in, out := &in.SelectFields, &out.SelectFields
 		*out = make([]*string, len(*in))
 		for i := range *in {
 			if (*in)[i] != nil {
@@ -29,19 +72,8 @@ func (in *Input) DeepCopyInto(out *Input) {
 			}
 		}
 	}
-	if in.Subscriptions != nil {
-		in, out := &in.Subscriptions, &out.Subscriptions
-		*out = make([]*string, len(*in))
-		for i := range *in {
-			if (*in)[i] != nil {
-				in, out := &(*in)[i], &(*out)[i]
-				*out = new(string)
-				**out = **in
-			}
-		}
-	}
-	if in.SubscriptionsRef != nil {
-		in, out := &in.SubscriptionsRef, &out.SubscriptionsRef
+	if in.FilterExpression != nil {
+		in, out := &in.FilterExpression, &out.FilterExpression
 		*out = new(string)
 		**out = **in
 	}

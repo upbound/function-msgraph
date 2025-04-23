@@ -3,10 +3,10 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.17.2
-  name: inputs.azresourcegraph.fn.crossplane.io
+    controller-gen.kubebuilder.io/version: v0.17.3
+  name: inputs.msgraph.fn.crossplane.io
 spec:
-  group: azresourcegraph.fn.crossplane.io
+  group: msgraph.fn.crossplane.io
   names:
     categories:
     - crossplane
@@ -28,6 +28,20 @@ spec:
               may reject unrecognized values.
               More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
+          customQuery:
+            description: Custom Microsoft Graph API query
+            type: string
+          filterExpression:
+            description: FilterExpression allows custom filters for the query
+            type: string
+          group:
+            description: Group is a single group name for group membership queries
+            type: string
+          groups:
+            description: Groups is a list of group names for group object ID queries
+            items:
+              type: string
+            type: array
           kind:
             description: |-
               Kind is a string value representing the REST resource this object represents.
@@ -36,42 +50,45 @@ spec:
               In CamelCase.
               More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
             type: string
-          managementGroups:
-            description: 'Azure management groups against which to execute the query.
-              Example: [ ''mg1'', ''mg2'' ]'
-            items:
-              type: string
-            type: array
           metadata:
             type: object
-          query:
-            description: Query to Azure Resource Graph API
-            type: string
           queryRef:
             description: |-
               Reference to retrieve the query string (e.g., from status or context)
               Overrides Query field if used
             type: string
+          queryType:
+            description: |-
+              QueryType defines the type of Microsoft Graph API query to perform
+              Supported values: UserValidation, GroupMembership, GroupObjectIDs, ServicePrincipalDetails
+            type: string
+          selectFields:
+            description: SelectFields specifies which fields to include in the API
+              response
+            items:
+              type: string
+            type: array
+          servicePrincipals:
+            description: ServicePrincipals is a list of service principal names
+            items:
+              type: string
+            type: array
           skipQueryWhenTargetHasData:
             description: |-
               SkipQueryWhenTargetHasData controls whether to skip the query when the target already has data
               Default is false to ensure continuous reconciliation
             type: boolean
-          subscriptions:
-            description: 'Azure subscriptions against which to execute the query.
-              Example: [ ''sub1'',''sub2'' ]'
-            items:
-              type: string
-            type: array
-          subscriptionsRef:
-            description: |-
-              Reference to retrieve the subscriptions (e.g., from status or context)
-              Overrides Subscriptions field if used
-            type: string
           target:
             description: Target where to store the Query Result
             type: string
+          users:
+            description: Users is a list of userPrincipalName (email IDs) for user
+              validation
+            items:
+              type: string
+            type: array
         required:
+        - queryType
         - target
         type: object
     served: true

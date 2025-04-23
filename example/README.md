@@ -1,54 +1,67 @@
-# Example manifests
+# Microsoft Graph API Function Examples
 
-This directory contains a collection of practical examples to demonstrate the functionality. Each example is organized into a directory with a self-descriptive name.
+This directory contains practical examples that demonstrate the function-msgraph capabilities for querying Microsoft Graph API.
 
-## Usage
+## Prerequisites
 
-To render a specific example, navigate to its directory and run the `make` command.
+To run these examples, you need:
 
-Each example provides a unique `composition.yaml` file that highlights a specific function usage scenario.
+1. The Crossplane CLI installed
+2. Valid Azure credentials with Microsoft Graph API permissions:
+   - User.Read.All (for user validation)
+   - Group.Read.All (for group operations)
+   - Application.Read.All (for service principal details)
 
-The Makefile in the examples directory provides a simple `render` target to
-streamline rendering Crossplane compositions.
+## Update Credentials
 
-To enable a successful query, update `secrets/azure-creds.yaml` with
-your valid Azure credentials.
+Before running any examples, update `secrets/azure-creds.yaml` with your valid Azure credentials:
 
-## Example
-
-For instance, the static-query-to-context-field directory demonstrates how to use a static query to populate a specific context field.
-
-```shell
-$ cd queryref-from-environment
-$ make
-crossplane render ../xr.yaml composition.yaml ./functions.yaml --function-credentials=../secrets/azure-creds.yaml --extra-resources=envconfig.yaml  -rc
----
-apiVersion: example.crossplane.io/v1
-kind: XR
+```yaml
+apiVersion: v1
+kind: Secret
 metadata:
-  name: example-xr
-status:
-  conditions:
-  - lastTransitionTime: "2024-01-01T00:00:00Z"
-    reason: Available
-    status: "True"
-    type: Ready
----
-apiVersion: render.crossplane.io/v1beta1
-kind: Result
-message: 'Query: "Resources|count"'
-severity: SEVERITY_NORMAL
-step: query-azresourcegraph
----
-apiVersion: render.crossplane.io/v1beta1
-fields:
-  apiextensions.crossplane.io/environment:
-    apiVersion: internal.crossplane.io/v1alpha1
-    azResourceGraphQuery: Resources|count
-    kind: Environment
-  azResourceGraphQueryResult:
-  - Count: 204
-kind: Context
+  name: azure-account-creds
+type: Opaque
+stringData:
+  credentials: |
+    {
+      "clientId": "your-client-id",
+      "clientSecret": "your-client-secret",
+      "tenantId": "your-tenant-id",
+      "subscriptionId": "your-subscription-id"
+    }
 ```
 
-Explore the examples to better understand various use cases and integrations!
+## Core Examples
+
+### 1. User Validation
+
+Validate if specified Azure AD users exist:
+
+```shell
+crossplane render xr.yaml user-validation-example.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc
+```
+
+### 2. Group Membership
+
+Get all members of a specified Azure AD group:
+
+```shell
+crossplane render xr.yaml group-membership-example.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc
+```
+
+### 3. Group Object IDs
+
+Get object IDs for specified Azure AD groups:
+
+```shell
+crossplane render xr.yaml group-objectids-example.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc
+```
+
+### 4. Service Principal Details
+
+Get details of specified service principals:
+
+```shell
+crossplane render xr.yaml service-principal-example.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc
+```

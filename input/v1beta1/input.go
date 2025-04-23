@@ -1,6 +1,6 @@
 // Package v1beta1 contains the input type for this Function
 // +kubebuilder:object:generate=true
-// +groupName=azresourcegraph.fn.crossplane.io
+// +groupName=msgraph.fn.crossplane.io
 // +versionName=v1alpha1
 package v1beta1
 
@@ -11,9 +11,6 @@ import (
 // This isn't a custom resource, in the sense that we never install its CRD.
 // It is a KRM-like object, so we generate a CRD to describe its schema.
 
-// TODO: Add your input type here! It doesn't need to be called 'Input', you can
-// rename it to anything you like.
-
 // Input can be used to provide input to this Function.
 // +kubebuilder:object:root=true
 // +kubebuilder:storageversion
@@ -22,30 +19,45 @@ type Input struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// Query to Azure Resource Graph API
+	// QueryType defines the type of Microsoft Graph API query to perform
+	// Supported values: UserValidation, GroupMembership, GroupObjectIDs, ServicePrincipalDetails
+	QueryType string `json:"queryType"`
+
+	// Users is a list of userPrincipalName (email IDs) for user validation
 	// +optional
-	Query string `json:"query,omitempty"`
+	Users []*string `json:"users,omitempty"`
+
+	// Groups is a list of group names for group object ID queries
+	// +optional
+	Groups []*string `json:"groups,omitempty"`
+
+	// Group is a single group name for group membership queries
+	// +optional
+	Group *string `json:"group,omitempty"`
+
+	// ServicePrincipals is a list of service principal names
+	// +optional
+	ServicePrincipals []*string `json:"servicePrincipals,omitempty"`
+
+	// Custom Microsoft Graph API query
+	// +optional
+	CustomQuery *string `json:"customQuery,omitempty"`
 
 	// Reference to retrieve the query string (e.g., from status or context)
 	// Overrides Query field if used
 	// +optional
 	QueryRef *string `json:"queryRef,omitempty"`
 
-	// Azure management groups against which to execute the query. Example: [ 'mg1', 'mg2' ]
-	// +optional
-	ManagementGroups []*string `json:"managementGroups,omitempty"`
-
-	// Azure subscriptions against which to execute the query. Example: [ 'sub1','sub2' ]
-	// +optional
-	Subscriptions []*string `json:"subscriptions,omitempty"`
-
-	// Reference to retrieve the subscriptions (e.g., from status or context)
-	// Overrides Subscriptions field if used
-	// +optional
-	SubscriptionsRef *string `json:"subscriptionsRef,omitempty"`
-
 	// Target where to store the Query Result
 	Target string `json:"target"`
+
+	// SelectFields specifies which fields to include in the API response
+	// +optional
+	SelectFields []*string `json:"selectFields,omitempty"`
+
+	// FilterExpression allows custom filters for the query
+	// +optional
+	FilterExpression *string `json:"filterExpression,omitempty"`
 
 	// SkipQueryWhenTargetHasData controls whether to skip the query when the target already has data
 	// Default is false to ensure continuous reconciliation

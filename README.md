@@ -1,155 +1,223 @@
-# function-azresourcegraph
-[![CI](https://github.com/upbound/function-azresourcegraph/actions/workflows/ci.yml/badge.svg)](https://github.com/upbound/function-azresourcegraph/actions/workflows/ci.yml)
+# function-msgraph
 
-A function to query [Azure Resource Graph][azresourcegraph]
+A Crossplane composition function for querying the Microsoft Graph API.
+
+## Overview
+
+The `function-msgraph` provides read-only access to Microsoft Graph API endpoints, allowing Crossplane compositions to:
+
+1. Validate Azure AD User Existence
+2. Get Group Membership
+3. Get Group Object IDs
+4. Get Service Principal Details
+
+The function supports throttling mitigation with the `skipQueryWhenTargetHasData` flag to avoid unnecessary API calls.
 
 ## Usage
 
-See the [examples][examples] for a variety of practical and testable use cases demonstrating this Function.
-
-Example pipeline step:
+Add the function to your Crossplane installation:
 
 ```yaml
+apiVersion: pkg.crossplane.io/v1beta1
+kind: Function
+metadata:
+  name: function-msgraph
+spec:
+  package: xpkg.upbound.io/upbound/function-msgraph:v0.1.0
+```
+
+### Azure Credentials
+
+Create an Azure service principal with appropriate permissions to access Microsoft Graph API:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: azure-account-creds
+  namespace: crossplane-system
+type: Opaque
+stringData:
+  credentials: |
+    {
+      "clientId": "your-client-id",
+      "clientSecret": "your-client-secret", 
+      "subscriptionId": "your-subscription-id",
+      "tenantId": "your-tenant-id"
+    }
+```
+
+The service principal needs the following Microsoft Graph API permissions:
+- User.Read.All (for user validation)
+- Group.Read.All (for group operations)
+- Application.Read.All (for service principal details)
+
+## Examples
+
+### Validate Azure AD Users
+
+```yaml
+apiVersion: example.crossplane.io/v1
+kind: Composition
+metadata:
+  name: user-validation-example
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1
+    kind: XR
   pipeline:
-  - step: query-azresourcegraph
+  - step: validate-user
     functionRef:
-      name: function-azresourcegraph
+      name: function-msgraph
     input:
-      apiVersion: azresourcegraph.fn.crossplane.io/v1alpha1
+      apiVersion: msgraph.fn.crossplane.io/v1alpha1
       kind: Input
-      query: "Resources | project name, location, type, id| where type =~ 'Microsoft.Compute/virtualMachines' | order by name desc"
-      target: "status.azResourceGraphQueryResult"
+      queryType: UserValidation
+      users:
+        - "user1@yourdomain.com"
+        - "user2@yourdomain.com"
+      target: "status.validatedUsers"
+      skipQueryWhenTargetHasData: true
     credentials:
       - name: azure-creds
         source: Secret
         secretRef:
-          namespace: upbound-system
+          namespace: crossplane-system
           name: azure-account-creds
 ```
 
-The Azure Credentials Secret structure is fully compatible with the standard
-[Azure Official Provider][azop]
-
-Example XR status after e2e query:
+### Get Group Membership
 
 ```yaml
 apiVersion: example.crossplane.io/v1
-kind: XR
+kind: Composition
 metadata:
-...
-status:
-  azResourceGraphQueryResult:
-  - id: /subscriptions/f403a412-959c-4214-8c4d-ad5598f149cc/resourceGroups/us-vm-zxqnj-s2jdb/providers/Microsoft.Compute/virtualMachines/us-vm-zxqnj-2h59v
-    location: centralus
-    name: us-vm-zxqnj-2h59v
-    type: microsoft.compute/virtualmachines
-  - id: /subscriptions/f403a412-959c-4214-8c4d-ad5598f149cc/resourceGroups/us-vm-lzbpt-tdv2h/providers/Microsoft.Compute/virtualMachines/us-vm-lzbpt-fgcds
-    location: centralus
-    name: us-vm-lzbpt-fgcds
-    type: microsoft.compute/virtualmachines
-```
-
-### QueryRef
-
-Rather than specifying a direct query string as shown in the example above,
-the function allows referencing a query from any arbitrary field within the Context or Status.
-
-#### Context Query Reference
-
-* Simple context field reference
-```yaml
-      queryRef: "context.azResourceGraphQuery"
-```
-
-* Get data from Environment
-```yaml
-      queryRef: "context.[apiextensions.crossplane.io/environment].azResourceGraphQuery"
-```
-
-#### XR Status Query Reference
-
-* Simple XR Status field reference
-```yaml
-      queryRef: "status.azResourceGraphQuery"
-```
-
-* Get data from nested field in XR status. Use brackets if key contains dots.
-```yaml
-      queryRef: "status.[fancy.key.with.dots].azResourceGraphQuery"
-```
-
-### Targets
-
-Function supports publishing Query Results to different locations.
-
-#### Context Target
-
-* Simple Context field target
-```yaml
-      target: "context.azResourceGraphQueryResult"
-```
-
-* Put results into Environment key
-```yaml
-      target: "context.[apiextensions.crossplane.io/environment].azResourceGraphQuery"
-```
-
-#### XR Status Target
-
-* Simple XR status field target
-```yaml
-      target: "status.azResourceGraphQueryResult"
-```
-
-* Put query results to nested field under XR status. Use brackets if key contains dots
-```yaml
-      target: "status.[fancy.key.with.dots].azResourceGraphQueryResult"
-```
-
-## Mitigating Azure API throttling
-
-If you encounter Azure API throttling, you can reduce the number of queries
-using the optional `skipQueryWhenTargetHasData` flag:
-
-```yaml
-  - step: query-azresourcegraph
+  name: group-membership-example
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1
+    kind: XR
+  pipeline:
+  - step: get-group-members
     functionRef:
-      name: function-azresourcegraph
+      name: function-msgraph
     input:
-      apiVersion: azresourcegraph.fn.crossplane.io/v1beta1
+      apiVersion: msgraph.fn.crossplane.io/v1alpha1
       kind: Input
-      query: "Resources | project name, location, type, id| where type =~ 'Microsoft.Compute/virtualMachines' | order by name desc"
-      target: "status.azResourceGraphQueryResult"
-      skipQueryWhenTargetHasData: true # Optional: Set to true to skip query if target already contains data
+      queryType: GroupMembership
+      group: "Developers"
+      # The function will automatically select standard fields:
+      # - id, displayName, mail, userPrincipalName, appId, description
+      target: "status.groupMembers"
+      skipQueryWhenTargetHasData: true
+    credentials:
+      - name: azure-creds
+        source: Secret
+        secretRef:
+          namespace: crossplane-system
+          name: azure-account-creds
 ```
 
-Use this option carefully, as it may lead to stale query results over time.
-
-## Explicit Subscriptions scope
-
-It is possible to specify explicit subscriptions scope and override the one that
-is coming from credentials
+### Get Group Object IDs
 
 ```yaml
+apiVersion: example.crossplane.io/v1
+kind: Composition
+metadata:
+  name: group-objectids-example
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1
+    kind: XR
+  pipeline:
+  - step: get-group-objectids
+    functionRef:
+      name: function-msgraph
+    input:
+      apiVersion: msgraph.fn.crossplane.io/v1alpha1
       kind: Input
-      query: "Resources | project name, location, type, id| where type =~ 'Microsoft.Compute/virtualMachines' | order by name desc"
-      subscriptions:
-        - 00000000-0000-0000-0000-000000000001
-        - 00000000-0000-0000-0000-000000000002
-      target: "status.azResourceGraphQueryResult"
+      queryType: GroupObjectIDs
+      groups:
+        - "Developers"
+        - "Operations"
+        - "Security"
+      target: "status.groupObjectIDs"
+      skipQueryWhenTargetHasData: true
+    credentials:
+      - name: azure-creds
+        source: Secret
+        secretRef:
+          namespace: crossplane-system
+          name: azure-account-creds
 ```
 
-There is also possible to use references from status and context.
-
+### Get Service Principal Details
 
 ```yaml
-subscriptionsRef: status.subscriptions
+apiVersion: example.crossplane.io/v1
+kind: Composition
+metadata:
+  name: service-principal-example
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1
+    kind: XR
+  pipeline:
+  - step: get-service-principal-details
+    functionRef:
+      name: function-msgraph
+    input:
+      apiVersion: msgraph.fn.crossplane.io/v1alpha1
+      kind: Input
+      queryType: ServicePrincipalDetails
+      servicePrincipals:
+        - "MyServiceApp"
+        - "ApiConnector"
+      target: "status.servicePrincipalDetails"
+      skipQueryWhenTargetHasData: true
+    credentials:
+      - name: azure-creds
+        source: Secret
+        secretRef:
+          namespace: crossplane-system
+          name: azure-account-creds
 ```
+
+## Input Configuration Options
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `queryType` | string | Required. Type of query to perform. Valid values: `UserValidation`, `GroupMembership`, `GroupObjectIDs`, `ServicePrincipalDetails` |
+| `users` | []string | List of user principal names (email IDs) for user validation |
+| `group` | string | Single group name for group membership queries |
+| `groups` | []string | List of group names for group object ID queries |
+| `servicePrincipals` | []string | List of service principal names |
+| `queryRef` | string | Optional. Reference to retrieve the query from status or context. Format: `status.<field>` or `context.<field>` |
+| `target` | string | Required. Where to store the query results. Can be `status.<field>` or `context.<field>` |
+| `skipQueryWhenTargetHasData` | bool | Optional. When true, will skip the query if the target already has data |
+
+## Result Targets
+
+Results can be stored in either XR Status or Composition Context:
 
 ```yaml
-subscriptionsRef: "context.[apiextensions.crossplane.io/environment].subscriptions"
+# Store in XR Status
+target: "status.results"
+
+# Store in nested XR Status
+target: "status.nested.field.results"
+
+# Store in Composition Context
+target: "context.results"
+
+# Store in Environment
+target: "context.[apiextensions.crossplane.io/environment].results"
 ```
 
-[azresourcegraph]: https://learn.microsoft.com/en-us/azure/governance/resource-graph/
-[azop]: https://marketplace.upbound.io/providers/upbound/provider-family-azure/latest
-[examples]: ./example
+## References
+
+- [Microsoft Graph API Overview](https://learn.microsoft.com/en-us/graph/api/overview?view=graph-rest-1.0)
+- [User validation](https://learn.microsoft.com/en-us/graph/api/user-list?view=graph-rest-1.0&tabs=go)
+- [Group membership](https://learn.microsoft.com/en-us/graph/api/group-list-members?view=graph-rest-1.0&tabs=go)
+- [Group listing](https://learn.microsoft.com/en-us/graph/api/group-list?view=graph-rest-1.0&tabs=go)
+- [Service principal listing](https://learn.microsoft.com/en-us/graph/api/serviceprincipal-list?view=graph-rest-1.0&tabs=http)

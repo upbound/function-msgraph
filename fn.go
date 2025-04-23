@@ -4,17 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resourcegraph/armresourcegraph"
-	"github.com/upbound/function-azresourcegraph/input/v1beta1"
+
+	azauth "github.com/microsoft/kiota-authentication-azure-go"
+	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
+	"github.com/microsoftgraph/msgraph-sdk-go/groups"
+	"github.com/microsoftgraph/msgraph-sdk-go/serviceprincipals"
+	"github.com/microsoftgraph/msgraph-sdk-go/users"
+
+	"github.com/upbound/function-msgraph/input/v1beta1"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/crossplane/crossplane-runtime/pkg/errors"
-	"github.com/crossplane/crossplane-runtime/pkg/fieldpath"
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
 	fnv1 "github.com/crossplane/function-sdk-go/proto/v1"
 	"github.com/crossplane/function-sdk-go/request"
@@ -22,16 +27,16 @@ import (
 	"github.com/crossplane/function-sdk-go/response"
 )
 
-// AzureQueryInterface defines the methods required for querying Azure resources.
-type AzureQueryInterface interface {
-	azQuery(ctx context.Context, azureCreds map[string]string, in *v1beta1.Input) (armresourcegraph.ClientResourcesResponse, error)
+// GraphQueryInterface defines the methods required for querying Microsoft Graph API.
+type GraphQueryInterface interface {
+	graphQuery(ctx context.Context, azureCreds map[string]string, in *v1beta1.Input) (interface{}, error)
 }
 
 // Function returns whatever response you ask it to.
 type Function struct {
 	fnv1.UnimplementedFunctionRunnerServiceServer
 
-	azureQuery AzureQueryInterface
+	graphQuery GraphQueryInterface
 
 	log logging.Logger
 }
@@ -56,20 +61,8 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 	}
 
 	// Get query from reference if specified
-	if err := f.resolveQuery(req, in, rsp); err != nil {
+	if err := f.resolveQueryRef(req, in, rsp); err != nil {
 		return rsp, nil //nolint:nilerr // errors are handled in rsp. We should not error main function and proceed with reconciliation
-	}
-
-	// Get subscriptions from reference if specified
-	if err := f.resolveSubscriptions(req, in, rsp); err != nil {
-		return rsp, nil //nolint:nilerr // errors are handled in rsp. We should not error main function and proceed with reconciliation
-	}
-
-	// Check if query is empty
-	if in.Query == "" {
-		response.Warning(rsp, errors.New("Query is empty"))
-		f.log.Info("WARNING: ", "query is empty", in.Query)
-		return rsp, nil
 	}
 
 	// Check if target is valid
@@ -125,18 +118,20 @@ func (f *Function) parseInputAndCredentials(req *fnv1.RunFunctionRequest, rsp *f
 		return nil, nil, err
 	}
 
-	if f.azureQuery == nil {
-		f.azureQuery = &AzureQuery{}
+	if f.graphQuery == nil {
+		f.graphQuery = &GraphQuery{}
 	}
 
 	return in, azureCreds, nil
 }
 
-// resolveQuery resolves the query from a reference if specified.
-func (f *Function) resolveQuery(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) error {
-	switch {
-	case in.QueryRef == nil:
+// resolveQueryRef resolves the query from a reference if specified.
+func (f *Function) resolveQueryRef(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) error {
+	if in.QueryRef == nil {
 		return nil
+	}
+
+	switch {
 	case strings.HasPrefix(*in.QueryRef, "status."):
 		if err := f.getQueryFromStatus(req, in); err != nil {
 			response.Fatal(rsp, err)
@@ -145,44 +140,11 @@ func (f *Function) resolveQuery(req *fnv1.RunFunctionRequest, in *v1beta1.Input,
 	case strings.HasPrefix(*in.QueryRef, "context."):
 		functionContext := req.GetContext().AsMap()
 		if queryFromContext, ok := GetNestedKey(functionContext, strings.TrimPrefix(*in.QueryRef, "context.")); ok {
-			in.Query = queryFromContext
+			in.CustomQuery = &queryFromContext
 		}
 	default:
 		response.Fatal(rsp, errors.Errorf("Unrecognized QueryRef field: %s", *in.QueryRef))
 		return errors.New("unrecognized QueryRef field")
-	}
-	return nil
-}
-
-// resolveSubscriptions resolves the subscriptions from a reference if specified.
-func (f *Function) resolveSubscriptions(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) error {
-	if in.SubscriptionsRef == nil {
-		return nil
-	}
-
-	switch {
-	case strings.HasPrefix(*in.SubscriptionsRef, "status."):
-		if err := f.getSubscriptionsFromStatus(req, in); err != nil {
-			response.Fatal(rsp, err)
-			return err
-		}
-	case strings.HasPrefix(*in.SubscriptionsRef, "context."):
-		functionContext := req.GetContext().AsMap()
-		paved := fieldpath.Pave(functionContext)
-		value, err := paved.GetValue(strings.TrimPrefix(*in.SubscriptionsRef, "context."))
-		if err == nil && value != nil {
-			if arr, ok := value.([]interface{}); ok {
-				in.Subscriptions = make([]*string, len(arr))
-				for i, sub := range arr {
-					if strSub, ok := sub.(string); ok {
-						in.Subscriptions[i] = to.Ptr(strSub)
-					}
-				}
-			}
-		}
-	default:
-		response.Fatal(rsp, errors.Errorf("Unrecognized SubscriptionsRef field: %s", *in.SubscriptionsRef))
-		return errors.New("unrecognized SubscriptionsRef field")
 	}
 	return nil
 }
@@ -235,29 +197,7 @@ func (f *Function) getQueryFromStatus(req *fnv1.RunFunctionRequest, in *v1beta1.
 	}
 
 	if queryFromXRStatus, ok := GetNestedKey(xrStatus, strings.TrimPrefix(*in.QueryRef, "status.")); ok {
-		in.Query = queryFromXRStatus
-	}
-	return nil
-}
-
-// getSubscriptionsFromStatus gets subscriptions from the XR status
-func (f *Function) getSubscriptionsFromStatus(req *fnv1.RunFunctionRequest, in *v1beta1.Input) error {
-	xrStatus, _, err := f.getXRAndStatus(req)
-	if err != nil {
-		return err
-	}
-
-	paved := fieldpath.Pave(xrStatus)
-	value, err := paved.GetValue(strings.TrimPrefix(*in.SubscriptionsRef, "status."))
-	if err == nil && value != nil {
-		if arr, ok := value.([]interface{}); ok {
-			in.Subscriptions = make([]*string, len(arr))
-			for i, sub := range arr {
-				if strSub, ok := sub.(string); ok {
-					in.Subscriptions[i] = to.Ptr(strSub)
-				}
-			}
-		}
+		in.CustomQuery = &queryFromXRStatus
 	}
 	return nil
 }
@@ -282,24 +222,24 @@ func (f *Function) checkStatusTargetHasData(req *fnv1.RunFunctionRequest, in *v1
 }
 
 // executeQuery executes the query.
-func (f *Function) executeQuery(ctx context.Context, azureCreds map[string]string, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) (armresourcegraph.ClientResourcesResponse, error) {
-	results, err := f.azureQuery.azQuery(ctx, azureCreds, in)
+func (f *Function) executeQuery(ctx context.Context, azureCreds map[string]string, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) (interface{}, error) {
+	results, err := f.graphQuery.graphQuery(ctx, azureCreds, in)
 	if err != nil {
 		response.Fatal(rsp, err)
 		f.log.Info("FAILURE: ", "failure", fmt.Sprint(err))
-		return armresourcegraph.ClientResourcesResponse{}, err
+		return nil, err
 	}
 
 	// Print the obtained query results
-	f.log.Info("Query:", "query", in.Query)
-	f.log.Info("Results:", "results", fmt.Sprint(results.Data))
-	response.Normalf(rsp, "Query: %q", in.Query)
+	f.log.Info("Query Type:", "queryType", in.QueryType)
+	f.log.Info("Results:", "results", fmt.Sprint(results))
+	response.Normalf(rsp, "QueryType: %q", in.QueryType)
 
 	return results, nil
 }
 
 // processResults processes the query results.
-func (f *Function) processResults(req *fnv1.RunFunctionRequest, in *v1beta1.Input, results armresourcegraph.ClientResourcesResponse, rsp *fnv1.RunFunctionResponse) error {
+func (f *Function) processResults(req *fnv1.RunFunctionRequest, in *v1beta1.Input, results interface{}, rsp *fnv1.RunFunctionResponse) error {
 	switch {
 	case strings.HasPrefix(in.Target, "status."):
 		err := f.putQueryResultToStatus(req, rsp, in, results)
@@ -340,53 +280,317 @@ func getCreds(req *fnv1.RunFunctionRequest) (map[string]string, error) {
 	return azureCreds, nil
 }
 
-// AzureQuery is a concrete implementation of the AzureQueryInterface
-// that interacts with Azure Resource Graph API.
-type AzureQuery struct{}
+// GraphQuery is a concrete implementation of the GraphQueryInterface
+// that interacts with Microsoft Graph API.
+type GraphQuery struct{}
 
-// azQuery is a concrete implementation that interacts with Azure Resource Graph API.
-func (a *AzureQuery) azQuery(ctx context.Context, azureCreds map[string]string, in *v1beta1.Input) (armresourcegraph.ClientResourcesResponse, error) {
+// graphQuery is a concrete implementation that interacts with Microsoft Graph API.
+func (g *GraphQuery) graphQuery(ctx context.Context, azureCreds map[string]string, in *v1beta1.Input) (interface{}, error) {
 	tenantID := azureCreds["tenantId"]
 	clientID := azureCreds["clientId"]
 	clientSecret := azureCreds["clientSecret"]
-	subscriptionID := azureCreds["subscriptionId"]
 
-	// To configure DefaultAzureCredential to authenticate a user-assigned managed identity,
-	// set the environment variable AZURE_CLIENT_ID to the identity's client ID.
-
+	// Create Azure credential for Microsoft Graph
 	cred, err := azidentity.NewClientSecretCredential(tenantID, clientID, clientSecret, nil)
 	if err != nil {
-		return armresourcegraph.ClientResourcesResponse{}, errors.Wrap(err, "failed to obtain credentials")
+		return nil, errors.Wrap(err, "failed to obtain credentials")
 	}
 
-	// Create and authorize a ResourceGraph client
-	client, err := armresourcegraph.NewClient(cred, nil)
+	// Create authentication provider
+	authProvider, err := azauth.NewAzureIdentityAuthenticationProviderWithScopes(cred, []string{"https://graph.microsoft.com/.default"})
 	if err != nil {
-		return armresourcegraph.ClientResourcesResponse{}, errors.Wrap(err, "failed to create client")
+		return nil, errors.Wrap(err, "failed to create auth provider")
 	}
 
-	queryRequest := armresourcegraph.QueryRequest{
-		Query: to.Ptr(in.Query),
-	}
-
-	// Handle subscriptions in the following priority:
-	// 1. Use Subscriptions field from Input if provided
-	// 2. Otherwise use the subscriptionID from creds if available
-	if len(in.Subscriptions) > 0 {
-		queryRequest.Subscriptions = in.Subscriptions
-	} else if len(subscriptionID) > 0 {
-		queryRequest.Subscriptions = []*string{to.Ptr(subscriptionID)}
-	}
-
-	if len(in.ManagementGroups) > 0 {
-		queryRequest.ManagementGroups = in.ManagementGroups
-	}
-
-	// Create the query request, Run the query and get the results.
-	results, err := client.Resources(ctx, queryRequest, nil)
+	// Create adapter
+	adapter, err := msgraphsdk.NewGraphRequestAdapter(authProvider)
 	if err != nil {
-		return armresourcegraph.ClientResourcesResponse{}, errors.Wrap(err, "failed to finish the request")
+		return nil, errors.Wrap(err, "failed to create graph adapter")
 	}
+
+	// Initialize Microsoft Graph client
+	client := msgraphsdk.NewGraphServiceClient(adapter)
+
+	// Route based on query type
+	switch in.QueryType {
+	case "UserValidation":
+		return g.validateUsers(ctx, client, in)
+	case "GroupMembership":
+		return g.getGroupMembers(ctx, client, in)
+	case "GroupObjectIDs":
+		return g.getGroupObjectIDs(ctx, client, in)
+	case "ServicePrincipalDetails":
+		return g.getServicePrincipalDetails(ctx, client, in)
+	case "CustomQuery":
+		if in.CustomQuery == nil || *in.CustomQuery == "" {
+			return nil, errors.New("custom query is empty")
+		}
+		// Custom queries not supported yet
+		return nil, errors.New("custom queries not implemented")
+	default:
+		return nil, errors.Errorf("unsupported query type: %s", in.QueryType)
+	}
+}
+
+// validateUsers validates if the provided user principal names (emails) exist
+func (g *GraphQuery) validateUsers(ctx context.Context, client *msgraphsdk.GraphServiceClient, in *v1beta1.Input) (interface{}, error) {
+	if len(in.Users) == 0 {
+		return nil, errors.New("no users provided for validation")
+	}
+
+	var results []interface{}
+
+	for _, userPrincipalName := range in.Users {
+		if userPrincipalName == nil {
+			continue
+		}
+
+		// Create request configuration
+		requestConfig := &users.UsersRequestBuilderGetRequestConfiguration{
+			QueryParameters: &users.UsersRequestBuilderGetQueryParameters{},
+		}
+
+		// Build filter expression
+		filterValue := fmt.Sprintf("userPrincipalName eq '%s'", *userPrincipalName)
+		requestConfig.QueryParameters.Filter = &filterValue
+
+		// Use standard fields for user validation
+		requestConfig.QueryParameters.Select = []string{"id", "displayName", "userPrincipalName", "mail"}
+
+		// Execute the query
+		result, err := client.Users().Get(ctx, requestConfig)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to validate user %s", *userPrincipalName)
+		}
+
+		// Process results
+		if result.GetValue() != nil {
+			for _, user := range result.GetValue() {
+				userMap := map[string]interface{}{
+					"id":                user.GetId(),
+					"displayName":       user.GetDisplayName(),
+					"userPrincipalName": user.GetUserPrincipalName(),
+					"mail":              user.GetMail(),
+				}
+				results = append(results, userMap)
+			}
+		}
+	}
+
+	return results, nil
+}
+
+// getGroupMembers retrieves all members of the specified group
+func (g *GraphQuery) getGroupMembers(ctx context.Context, client *msgraphsdk.GraphServiceClient, in *v1beta1.Input) (interface{}, error) {
+	if in.Group == nil || *in.Group == "" {
+		return nil, errors.New("no group name provided")
+	}
+
+	// First, find the group by displayName
+	filterValue := fmt.Sprintf("displayName eq '%s'", *in.Group)
+	groupRequestConfig := &groups.GroupsRequestBuilderGetRequestConfiguration{
+		QueryParameters: &groups.GroupsRequestBuilderGetQueryParameters{
+			Filter: &filterValue,
+		},
+	}
+
+	groupResult, err := client.Groups().Get(ctx, groupRequestConfig)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to find group")
+	}
+
+	if groupResult.GetValue() == nil || len(groupResult.GetValue()) == 0 {
+		return nil, errors.Errorf("group not found: %s", *in.Group)
+	}
+
+	// Get the group ID
+	groupID := groupResult.GetValue()[0].GetId()
+
+	// Now get the members
+	membersRequestConfig := &groups.ItemMembersRequestBuilderGetRequestConfiguration{
+		QueryParameters: &groups.ItemMembersRequestBuilderGetQueryParameters{},
+	}
+
+	// Use standard fields for group membership
+	membersRequestConfig.QueryParameters.Select = []string{
+		"id", "displayName", "mail", "userPrincipalName", 
+		"appId", "description",
+	}
+
+	// We'll skip expansion for now as it causes API errors
+	// DirectoryObject type doesn't support expansion with 'memberOf'
+	// If we need more data, we'll have to make separate calls for each member
+
+	// Use the dereferenced groupID (convert *string to string)
+	result, err := client.Groups().ByGroupId(*groupID).Members().Get(ctx, membersRequestConfig)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to get members for group %s", *in.Group)
+	}
+
+	// No verbose debug logging in production code
+
+	var members []interface{}
+
+	for _, member := range result.GetValue() {
+		// Process member data
+
+		memberType := "unknown"
+		memberMap := map[string]interface{}{
+			"id": member.GetId(),
+		}
+
+		// Try to extract displayName more carefully
+		additionalData := member.GetAdditionalData()
+		if displayNameVal, exists := additionalData["displayName"]; exists && displayNameVal != nil {
+			// Debug output removed
+			if displayName, ok := displayNameVal.(string); ok {
+				memberMap["displayName"] = displayName
+			}
+		} else {
+			memberValue := reflect.ValueOf(member)
+			displayNameMethod := memberValue.MethodByName("GetDisplayName")
+			if displayNameMethod.IsValid() && displayNameMethod.Type().NumIn() == 0 {
+				// Debug output removed
+				results := displayNameMethod.Call(nil)
+				if len(results) > 0 && !results[0].IsNil() {
+					// Check if the result is a *string
+					if displayNamePtr, ok := results[0].Interface().(*string); ok && displayNamePtr != nil {
+						memberMap["displayName"] = *displayNamePtr
+					}
+				}
+			}
+
+			// If still no displayName, use a placeholder
+			if _, hasDisplayName := memberMap["displayName"]; !hasDisplayName {
+				// Debug output removed
+				memberMap["displayName"] = fmt.Sprintf("Member %s", *member.GetId())
+			}
+		}
+
+		// Extract other properties more safely
+		if odataTypeVal, exists := additionalData["@odata.type"]; exists && odataTypeVal != nil {
+			if odataType, ok := odataTypeVal.(string); ok {
+				if strings.Contains(odataType, "user") {
+					memberType = "user"
+					// Extract user-specific properties more safely
+					if mailVal, exists := additionalData["mail"]; exists && mailVal != nil {
+						if mail, ok := mailVal.(string); ok {
+							memberMap["mail"] = mail
+						}
+					}
+					if upnVal, exists := additionalData["userPrincipalName"]; exists && upnVal != nil {
+						if upn, ok := upnVal.(string); ok {
+							memberMap["userPrincipalName"] = upn
+						}
+					}
+				} else if strings.Contains(odataType, "servicePrincipal") {
+					memberType = "servicePrincipal"
+					if appIdVal, exists := additionalData["appId"]; exists && appIdVal != nil {
+						if appId, ok := appIdVal.(string); ok {
+							memberMap["appId"] = appId
+						}
+					}
+				} else if strings.Contains(odataType, "group") {
+					memberType = "group"
+				}
+				memberMap["type"] = memberType
+			}
+		}
+
+		members = append(members, memberMap)
+	}
+
+	return members, nil
+}
+
+// getGroupObjectIDs retrieves object IDs for the specified group names
+func (g *GraphQuery) getGroupObjectIDs(ctx context.Context, client *msgraphsdk.GraphServiceClient, in *v1beta1.Input) (interface{}, error) {
+	if len(in.Groups) == 0 {
+		return nil, errors.New("no group names provided")
+	}
+
+	var results []interface{}
+
+	for _, groupName := range in.Groups {
+		if groupName == nil {
+			continue
+		}
+
+		// Create request configuration
+		requestConfig := &groups.GroupsRequestBuilderGetRequestConfiguration{
+			QueryParameters: &groups.GroupsRequestBuilderGetQueryParameters{},
+		}
+
+		// Find the group by displayName
+		filterValue := fmt.Sprintf("displayName eq '%s'", *groupName)
+		requestConfig.QueryParameters.Filter = &filterValue
+
+		// Use standard fields for group object IDs
+		requestConfig.QueryParameters.Select = []string{"id", "displayName", "description"}
+
+		groupResult, err := client.Groups().Get(ctx, requestConfig)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to find group %s", *groupName)
+		}
+
+		if groupResult.GetValue() != nil && len(groupResult.GetValue()) > 0 {
+			for _, group := range groupResult.GetValue() {
+				groupMap := map[string]interface{}{
+					"id":          group.GetId(),
+					"displayName": group.GetDisplayName(),
+					"description": group.GetDescription(),
+				}
+				results = append(results, groupMap)
+			}
+		}
+	}
+
+	return results, nil
+}
+
+// getServicePrincipalDetails retrieves details about service principals by name
+func (g *GraphQuery) getServicePrincipalDetails(ctx context.Context, client *msgraphsdk.GraphServiceClient, in *v1beta1.Input) (interface{}, error) {
+	if len(in.ServicePrincipals) == 0 {
+		return nil, errors.New("no service principal names provided")
+	}
+
+	var results []interface{}
+
+	for _, spName := range in.ServicePrincipals {
+		if spName == nil {
+			continue
+		}
+
+		// Create request configuration
+		requestConfig := &serviceprincipals.ServicePrincipalsRequestBuilderGetRequestConfiguration{
+			QueryParameters: &serviceprincipals.ServicePrincipalsRequestBuilderGetQueryParameters{},
+		}
+
+		// Find service principal by displayName
+		filterValue := fmt.Sprintf("displayName eq '%s'", *spName)
+		requestConfig.QueryParameters.Filter = &filterValue
+
+		// Use standard fields for service principals
+		requestConfig.QueryParameters.Select = []string{"id", "appId", "displayName", "description"}
+
+		spResult, err := client.ServicePrincipals().Get(ctx, requestConfig)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to find service principal %s", *spName)
+		}
+
+		if spResult.GetValue() != nil && len(spResult.GetValue()) > 0 {
+			for _, sp := range spResult.GetValue() {
+				spMap := map[string]interface{}{
+					"id":          sp.GetId(),
+					"appId":       sp.GetAppId(),
+					"displayName": sp.GetDisplayName(),
+					"description": sp.GetDescription(),
+				}
+				results = append(results, spMap)
+			}
+		}
+	}
+
 	return results, nil
 }
 
@@ -473,7 +677,7 @@ func SetNestedKey(root map[string]interface{}, key string, value interface{}) er
 }
 
 // putQueryResultToStatus processes the query results to status
-func (f *Function) putQueryResultToStatus(req *fnv1.RunFunctionRequest, rsp *fnv1.RunFunctionResponse, in *v1beta1.Input, results armresourcegraph.ClientResourcesResponse) error {
+func (f *Function) putQueryResultToStatus(req *fnv1.RunFunctionRequest, rsp *fnv1.RunFunctionResponse, in *v1beta1.Input, results interface{}) error {
 	xrStatus, dxr, err := f.getXRAndStatus(req)
 	if err != nil {
 		return err
@@ -481,9 +685,9 @@ func (f *Function) putQueryResultToStatus(req *fnv1.RunFunctionRequest, rsp *fnv
 
 	// Update the specific status field
 	statusField := strings.TrimPrefix(in.Target, "status.")
-	err = SetNestedKey(xrStatus, statusField, results.Data)
+	err = SetNestedKey(xrStatus, statusField, results)
 	if err != nil {
-		return errors.Wrapf(err, "cannot set status field %s to %v", statusField, results.Data)
+		return errors.Wrapf(err, "cannot set status field %s to %v", statusField, results)
 	}
 
 	// Write the updated status field back into the composite resource
@@ -498,10 +702,9 @@ func (f *Function) putQueryResultToStatus(req *fnv1.RunFunctionRequest, rsp *fnv
 	return nil
 }
 
-func putQueryResultToContext(req *fnv1.RunFunctionRequest, rsp *fnv1.RunFunctionResponse, in *v1beta1.Input, results armresourcegraph.ClientResourcesResponse, f *Function) error {
-
+func putQueryResultToContext(req *fnv1.RunFunctionRequest, rsp *fnv1.RunFunctionResponse, in *v1beta1.Input, results interface{}, f *Function) error {
 	contextField := strings.TrimPrefix(in.Target, "context.")
-	data, err := structpb.NewValue(results.Data)
+	data, err := structpb.NewValue(results)
 	if err != nil {
 		return errors.Wrap(err, "cannot convert results data to structpb.Value")
 	}
@@ -514,7 +717,7 @@ func putQueryResultToContext(req *fnv1.RunFunctionRequest, rsp *fnv1.RunFunction
 		return errors.Wrap(err, "failed to update context key")
 	}
 
-	f.log.Debug("Updating Composition Pipeline Context", "key", contextField, "data", &results.Data)
+	f.log.Debug("Updating Composition Pipeline Context", "key", contextField, "data", results)
 
 	// Convert the updated context back into structpb.Struct
 	updatedContext, err := structpb.NewStruct(contextMap)
@@ -616,6 +819,15 @@ func (f *Function) preserveContext(req *fnv1.RunFunctionRequest, rsp *fnv1.RunFu
 // isValidTarget checks if the target is valid
 func (f *Function) isValidTarget(target string) bool {
 	return strings.HasPrefix(target, "status.") || strings.HasPrefix(target, "context.")
+}
+
+// getMapKeys returns a slice of keys from a map[string]interface{}
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // shouldSkipQuery checks if the query should be skipped.
