@@ -192,7 +192,6 @@ spec:
 | `group` | string | Single group name for group membership queries |
 | `groups` | []string | List of group names for group object ID queries |
 | `servicePrincipals` | []string | List of service principal names |
-| `queryRef` | string | Optional. Reference to retrieve the query from status or context. Format: `status.<field>` or `context.<field>` |
 | `target` | string | Required. Where to store the query results. Can be `status.<field>` or `context.<field>` |
 | `skipQueryWhenTargetHasData` | bool | Optional. When true, will skip the query if the target already has data |
 

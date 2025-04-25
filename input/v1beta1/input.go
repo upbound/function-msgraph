@@ -39,11 +39,6 @@ type Input struct {
 	// +optional
 	ServicePrincipals []*string `json:"servicePrincipals,omitempty"`
 
-	// Reference to retrieve the query string (e.g., from status or context)
-	// Overrides Query field if used
-	// +optional
-	QueryRef *string `json:"queryRef,omitempty"`
-
 	// Target where to store the Query Result
 	Target string `json:"target"`
 

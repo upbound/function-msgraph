@@ -46,11 +46,6 @@ spec:
             type: string
           metadata:
             type: object
-          queryRef:
-            description: |-
-              Reference to retrieve the query string (e.g., from status or context)
-              Overrides Query field if used
-            type: string
           queryType:
             description: |-
               QueryType defines the type of Microsoft Graph API query to perform

@@ -51,11 +51,6 @@ func (in *Input) DeepCopyInto(out *Input) {
 			}
 		}
 	}
-	if in.QueryRef != nil {
-		in, out := &in.QueryRef, &out.QueryRef
-		*out = new(string)
-		**out = **in
-	}
 	if in.SkipQueryWhenTargetHasData != nil {
 		in, out := &in.SkipQueryWhenTargetHasData, &out.SkipQueryWhenTargetHasData
 		*out = new(bool)
