@@ -28,12 +28,6 @@ spec:
               may reject unrecognized values.
               More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
-          customQuery:
-            description: Custom Microsoft Graph API query
-            type: string
-          filterExpression:
-            description: FilterExpression allows custom filters for the query
-            type: string
           group:
             description: Group is a single group name for group membership queries
             type: string
@@ -62,12 +56,6 @@ spec:
               QueryType defines the type of Microsoft Graph API query to perform
               Supported values: UserValidation, GroupMembership, GroupObjectIDs, ServicePrincipalDetails
             type: string
-          selectFields:
-            description: SelectFields specifies which fields to include in the API
-              response
-            items:
-              type: string
-            type: array
           servicePrincipals:
             description: ServicePrincipals is a list of service principal names
             items:

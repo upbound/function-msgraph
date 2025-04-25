@@ -51,29 +51,8 @@ func (in *Input) DeepCopyInto(out *Input) {
 			}
 		}
 	}
-	if in.CustomQuery != nil {
-		in, out := &in.CustomQuery, &out.CustomQuery
-		*out = new(string)
-		**out = **in
-	}
 	if in.QueryRef != nil {
 		in, out := &in.QueryRef, &out.QueryRef
-		*out = new(string)
-		**out = **in
-	}
-	if in.SelectFields != nil {
-		in, out := &in.SelectFields, &out.SelectFields
-		*out = make([]*string, len(*in))
-		for i := range *in {
-			if (*in)[i] != nil {
-				in, out := &(*in)[i], &(*out)[i]
-				*out = new(string)
-				**out = **in
-			}
-		}
-	}
-	if in.FilterExpression != nil {
-		in, out := &in.FilterExpression, &out.FilterExpression
 		*out = new(string)
 		**out = **in
 	}

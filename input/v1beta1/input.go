@@ -39,10 +39,6 @@ type Input struct {
 	// +optional
 	ServicePrincipals []*string `json:"servicePrincipals,omitempty"`
 
-	// Custom Microsoft Graph API query
-	// +optional
-	CustomQuery *string `json:"customQuery,omitempty"`
-
 	// Reference to retrieve the query string (e.g., from status or context)
 	// Overrides Query field if used
 	// +optional
@@ -50,14 +46,6 @@ type Input struct {
 
 	// Target where to store the Query Result
 	Target string `json:"target"`
-
-	// SelectFields specifies which fields to include in the API response
-	// +optional
-	SelectFields []*string `json:"selectFields,omitempty"`
-
-	// FilterExpression allows custom filters for the query
-	// +optional
-	FilterExpression *string `json:"filterExpression,omitempty"`
 
 	// SkipQueryWhenTargetHasData controls whether to skip the query when the target already has data
 	// Default is false to ensure continuous reconciliation

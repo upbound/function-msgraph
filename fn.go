@@ -59,11 +59,6 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		return rsp, nil //nolint:nilerr // errors are handled in rsp. We should not error main function and proceed with reconciliation
 	}
 
-	// Get query from reference if specified
-	if err := f.resolveQueryRef(req, in, rsp); err != nil {
-		return rsp, nil //nolint:nilerr // errors are handled in rsp. We should not error main function and proceed with reconciliation
-	}
-
 	// Check if target is valid
 	if !f.isValidTarget(in.Target) {
 		response.Fatal(rsp, errors.Errorf("Unrecognized target field: %s", in.Target))
@@ -124,30 +119,6 @@ func (f *Function) parseInputAndCredentials(req *fnv1.RunFunctionRequest, rsp *f
 	return in, azureCreds, nil
 }
 
-// resolveQueryRef resolves the query from a reference if specified.
-func (f *Function) resolveQueryRef(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) error {
-	if in.QueryRef == nil {
-		return nil
-	}
-
-	switch {
-	case strings.HasPrefix(*in.QueryRef, "status."):
-		if err := f.getQueryFromStatus(req, in); err != nil {
-			response.Fatal(rsp, err)
-			return err
-		}
-	case strings.HasPrefix(*in.QueryRef, "context."):
-		functionContext := req.GetContext().AsMap()
-		if queryFromContext, ok := GetNestedKey(functionContext, strings.TrimPrefix(*in.QueryRef, "context.")); ok {
-			in.CustomQuery = &queryFromContext
-		}
-	default:
-		response.Fatal(rsp, errors.Errorf("Unrecognized QueryRef field: %s", *in.QueryRef))
-		return errors.New("unrecognized QueryRef field")
-	}
-	return nil
-}
-
 // getXRAndStatus retrieves status and desired XR, handling initialization if needed
 func (f *Function) getXRAndStatus(req *fnv1.RunFunctionRequest) (map[string]interface{}, *resource.Composite, error) {
 	// Get both observed and desired XR
@@ -186,19 +157,6 @@ func (f *Function) getXRAndStatus(req *fnv1.RunFunctionRequest) (map[string]inte
 	}
 
 	return xrStatus, dxr, nil
-}
-
-// getQueryFromStatus gets query from the XR status
-func (f *Function) getQueryFromStatus(req *fnv1.RunFunctionRequest, in *v1beta1.Input) error {
-	xrStatus, _, err := f.getXRAndStatus(req)
-	if err != nil {
-		return err
-	}
-
-	if queryFromXRStatus, ok := GetNestedKey(xrStatus, strings.TrimPrefix(*in.QueryRef, "status.")); ok {
-		in.CustomQuery = &queryFromXRStatus
-	}
-	return nil
 }
 
 // checkStatusTargetHasData checks if the status target has data.
@@ -311,14 +269,6 @@ func (g *GraphQuery) createGraphClient(azureCreds map[string]string) (*msgraphsd
 	return msgraphsdk.NewGraphServiceClient(adapter), nil
 }
 
-// validateCustomQuery validates a custom query input
-func (g *GraphQuery) validateCustomQuery(in *v1beta1.Input) error {
-	if in.CustomQuery == nil || *in.CustomQuery == "" {
-		return errors.New("custom query is empty")
-	}
-	return errors.New("custom queries not implemented")
-}
-
 // graphQuery is a concrete implementation that interacts with Microsoft Graph API.
 func (g *GraphQuery) graphQuery(ctx context.Context, azureCreds map[string]string, in *v1beta1.Input) (interface{}, error) {
 	// Create the Microsoft Graph client
@@ -337,8 +287,6 @@ func (g *GraphQuery) graphQuery(ctx context.Context, azureCreds map[string]strin
 		return g.getGroupObjectIDs(ctx, client, in)
 	case "ServicePrincipalDetails":
 		return g.getServicePrincipalDetails(ctx, client, in)
-	case "CustomQuery":
-		return nil, g.validateCustomQuery(in)
 	default:
 		return nil, errors.Errorf("unsupported query type: %s", in.QueryType)
 	}
