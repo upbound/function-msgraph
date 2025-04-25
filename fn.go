@@ -9,13 +9,11 @@ import (
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
-
 	azauth "github.com/microsoft/kiota-authentication-azure-go"
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
 	"github.com/microsoftgraph/msgraph-sdk-go/groups"
 	"github.com/microsoftgraph/msgraph-sdk-go/serviceprincipals"
 	"github.com/microsoftgraph/msgraph-sdk-go/users"
-
 	"github.com/upbound/function-msgraph/input/v1beta1"
 	"google.golang.org/protobuf/types/known/structpb"
 
@@ -413,7 +411,7 @@ func (g *GraphQuery) getGroupMembers(ctx context.Context, client *msgraphsdk.Gra
 
 	// Use standard fields for group membership
 	membersRequestConfig.QueryParameters.Select = []string{
-		"id", "displayName", "mail", "userPrincipalName", 
+		"id", "displayName", "mail", "userPrincipalName",
 		"appId", "description",
 	}
 
@@ -429,7 +427,7 @@ func (g *GraphQuery) getGroupMembers(ctx context.Context, client *msgraphsdk.Gra
 
 	// No verbose debug logging in production code
 
-	var members []interface{}
+	members := make([]interface{}, 0, len(result.GetValue()))
 
 	for _, member := range result.GetValue() {
 		// Process member data
@@ -470,7 +468,8 @@ func (g *GraphQuery) getGroupMembers(ctx context.Context, client *msgraphsdk.Gra
 		// Extract other properties more safely
 		if odataTypeVal, exists := additionalData["@odata.type"]; exists && odataTypeVal != nil {
 			if odataType, ok := odataTypeVal.(string); ok {
-				if strings.Contains(odataType, "user") {
+				switch {
+				case strings.Contains(odataType, "user"):
 					memberType = "user"
 					// Extract user-specific properties more safely
 					if mailVal, exists := additionalData["mail"]; exists && mailVal != nil {
@@ -483,14 +482,14 @@ func (g *GraphQuery) getGroupMembers(ctx context.Context, client *msgraphsdk.Gra
 							memberMap["userPrincipalName"] = upn
 						}
 					}
-				} else if strings.Contains(odataType, "servicePrincipal") {
+				case strings.Contains(odataType, "servicePrincipal"):
 					memberType = "servicePrincipal"
-					if appIdVal, exists := additionalData["appId"]; exists && appIdVal != nil {
-						if appId, ok := appIdVal.(string); ok {
-							memberMap["appId"] = appId
+					if appIDVal, exists := additionalData["appId"]; exists && appIDVal != nil {
+						if appID, ok := appIDVal.(string); ok {
+							memberMap["appId"] = appID
 						}
 					}
-				} else if strings.Contains(odataType, "group") {
+				case strings.Contains(odataType, "group"):
 					memberType = "group"
 				}
 				memberMap["type"] = memberType
@@ -819,15 +818,6 @@ func (f *Function) preserveContext(req *fnv1.RunFunctionRequest, rsp *fnv1.RunFu
 // isValidTarget checks if the target is valid
 func (f *Function) isValidTarget(target string) bool {
 	return strings.HasPrefix(target, "status.") || strings.HasPrefix(target, "context.")
-}
-
-// getMapKeys returns a slice of keys from a map[string]interface{}
-func getMapKeys(m map[string]interface{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
 }
 
 // shouldSkipQuery checks if the query should be skipped.
