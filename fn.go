@@ -12,6 +12,7 @@ import (
 	azauth "github.com/microsoft/kiota-authentication-azure-go"
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
 	"github.com/microsoftgraph/msgraph-sdk-go/groups"
+	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/microsoftgraph/msgraph-sdk-go/serviceprincipals"
 	"github.com/microsoftgraph/msgraph-sdk-go/users"
 	"github.com/upbound/function-msgraph/input/v1beta1"
@@ -282,8 +283,8 @@ func getCreds(req *fnv1.RunFunctionRequest) (map[string]string, error) {
 // that interacts with Microsoft Graph API.
 type GraphQuery struct{}
 
-// graphQuery is a concrete implementation that interacts with Microsoft Graph API.
-func (g *GraphQuery) graphQuery(ctx context.Context, azureCreds map[string]string, in *v1beta1.Input) (interface{}, error) {
+// createGraphClient initializes a Microsoft Graph client using the provided credentials
+func (g *GraphQuery) createGraphClient(azureCreds map[string]string) (*msgraphsdk.GraphServiceClient, error) {
 	tenantID := azureCreds["tenantId"]
 	clientID := azureCreds["clientId"]
 	clientSecret := azureCreds["clientSecret"]
@@ -307,7 +308,24 @@ func (g *GraphQuery) graphQuery(ctx context.Context, azureCreds map[string]strin
 	}
 
 	// Initialize Microsoft Graph client
-	client := msgraphsdk.NewGraphServiceClient(adapter)
+	return msgraphsdk.NewGraphServiceClient(adapter), nil
+}
+
+// validateCustomQuery validates a custom query input
+func (g *GraphQuery) validateCustomQuery(in *v1beta1.Input) error {
+	if in.CustomQuery == nil || *in.CustomQuery == "" {
+		return errors.New("custom query is empty")
+	}
+	return errors.New("custom queries not implemented")
+}
+
+// graphQuery is a concrete implementation that interacts with Microsoft Graph API.
+func (g *GraphQuery) graphQuery(ctx context.Context, azureCreds map[string]string, in *v1beta1.Input) (interface{}, error) {
+	// Create the Microsoft Graph client
+	client, err := g.createGraphClient(azureCreds)
+	if err != nil {
+		return nil, err
+	}
 
 	// Route based on query type
 	switch in.QueryType {
@@ -320,11 +338,7 @@ func (g *GraphQuery) graphQuery(ctx context.Context, azureCreds map[string]strin
 	case "ServicePrincipalDetails":
 		return g.getServicePrincipalDetails(ctx, client, in)
 	case "CustomQuery":
-		if in.CustomQuery == nil || *in.CustomQuery == "" {
-			return nil, errors.New("custom query is empty")
-		}
-		// Custom queries not supported yet
-		return nil, errors.New("custom queries not implemented")
+		return nil, g.validateCustomQuery(in)
 	default:
 		return nil, errors.Errorf("unsupported query type: %s", in.QueryType)
 	}
@@ -378,123 +392,187 @@ func (g *GraphQuery) validateUsers(ctx context.Context, client *msgraphsdk.Graph
 	return results, nil
 }
 
-// getGroupMembers retrieves all members of the specified group
-func (g *GraphQuery) getGroupMembers(ctx context.Context, client *msgraphsdk.GraphServiceClient, in *v1beta1.Input) (interface{}, error) {
-	if in.Group == nil || *in.Group == "" {
-		return nil, errors.New("no group name provided")
-	}
-
-	// First, find the group by displayName
-	filterValue := fmt.Sprintf("displayName eq '%s'", *in.Group)
+// findGroupByName finds a group by its display name and returns its ID
+func (g *GraphQuery) findGroupByName(ctx context.Context, client *msgraphsdk.GraphServiceClient, groupName string) (*string, error) {
+	// Create filter by displayName
+	filterValue := fmt.Sprintf("displayName eq '%s'", groupName)
 	groupRequestConfig := &groups.GroupsRequestBuilderGetRequestConfiguration{
 		QueryParameters: &groups.GroupsRequestBuilderGetQueryParameters{
 			Filter: &filterValue,
 		},
 	}
 
+	// Query for the group
 	groupResult, err := client.Groups().Get(ctx, groupRequestConfig)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to find group")
 	}
 
+	// Verify we found a group
 	if groupResult.GetValue() == nil || len(groupResult.GetValue()) == 0 {
-		return nil, errors.Errorf("group not found: %s", *in.Group)
+		return nil, errors.Errorf("group not found: %s", groupName)
 	}
 
-	// Get the group ID
-	groupID := groupResult.GetValue()[0].GetId()
+	// Return the group ID
+	return groupResult.GetValue()[0].GetId(), nil
+}
 
-	// Now get the members
+// fetchGroupMembers fetches all members of a group by group ID
+func (g *GraphQuery) fetchGroupMembers(ctx context.Context, client *msgraphsdk.GraphServiceClient, groupID string, groupName string) ([]models.DirectoryObjectable, error) {
+	// Configure the members request
 	membersRequestConfig := &groups.ItemMembersRequestBuilderGetRequestConfiguration{
 		QueryParameters: &groups.ItemMembersRequestBuilderGetQueryParameters{},
 	}
 
-	// Use standard fields for group membership
+	// Select the fields we want
 	membersRequestConfig.QueryParameters.Select = []string{
 		"id", "displayName", "mail", "userPrincipalName",
 		"appId", "description",
 	}
 
-	// We'll skip expansion for now as it causes API errors
-	// DirectoryObject type doesn't support expansion with 'memberOf'
-	// If we need more data, we'll have to make separate calls for each member
-
-	// Use the dereferenced groupID (convert *string to string)
-	result, err := client.Groups().ByGroupId(*groupID).Members().Get(ctx, membersRequestConfig)
+	// Get the members
+	result, err := client.Groups().ByGroupId(groupID).Members().Get(ctx, membersRequestConfig)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get members for group %s", *in.Group)
+		return nil, errors.Wrapf(err, "failed to get members for group %s", groupName)
 	}
 
-	// No verbose debug logging in production code
+	return result.GetValue(), nil
+}
 
-	members := make([]interface{}, 0, len(result.GetValue()))
+// extractDisplayName attempts to extract the display name from a directory object
+func (g *GraphQuery) extractDisplayName(member models.DirectoryObjectable, memberID string) string {
+	additionalData := member.GetAdditionalData()
 
-	for _, member := range result.GetValue() {
-		// Process member data
-
-		memberType := "unknown"
-		memberMap := map[string]interface{}{
-			"id": member.GetId(),
+	// Try to get from additional data first
+	if displayNameVal, exists := additionalData["displayName"]; exists && displayNameVal != nil {
+		if displayName, ok := displayNameVal.(string); ok {
+			return displayName
 		}
+	}
 
-		// Try to extract displayName more carefully
+	// Try to use reflection to call GetDisplayName if it exists
+	memberValue := reflect.ValueOf(member)
+	displayNameMethod := memberValue.MethodByName("GetDisplayName")
+	if displayNameMethod.IsValid() && displayNameMethod.Type().NumIn() == 0 {
+		results := displayNameMethod.Call(nil)
+		if len(results) > 0 && !results[0].IsNil() {
+			// Check if the result is a *string
+			if displayNamePtr, ok := results[0].Interface().(*string); ok && displayNamePtr != nil {
+				return *displayNamePtr
+			}
+		}
+	}
+
+	// Use fallback display name
+	return fmt.Sprintf("Member %s", memberID)
+}
+
+// extractStringProperty safely extracts a string property from additionalData
+func (g *GraphQuery) extractStringProperty(additionalData map[string]interface{}, key string) (string, bool) {
+	if val, exists := additionalData[key]; exists && val != nil {
+		if strVal, ok := val.(string); ok {
+			return strVal, true
+		}
+	}
+	return "", false
+}
+
+// extractUserProperties extracts user-specific properties from additionalData
+func (g *GraphQuery) extractUserProperties(additionalData map[string]interface{}, memberMap map[string]interface{}) {
+	// Extract mail property
+	if mail, ok := g.extractStringProperty(additionalData, "mail"); ok {
+		memberMap["mail"] = mail
+	}
+
+	// Extract userPrincipalName property
+	if upn, ok := g.extractStringProperty(additionalData, "userPrincipalName"); ok {
+		memberMap["userPrincipalName"] = upn
+	}
+}
+
+// extractServicePrincipalProperties extracts service principal specific properties
+func (g *GraphQuery) extractServicePrincipalProperties(additionalData map[string]interface{}, memberMap map[string]interface{}) {
+	// Extract appId property
+	if appID, ok := g.extractStringProperty(additionalData, "appId"); ok {
+		memberMap["appId"] = appID
+	}
+}
+
+// getMemberType determines the type of member based on odata.type
+func (g *GraphQuery) getMemberType(odataType string) string {
+	switch {
+	case strings.Contains(odataType, "user"):
+		return "user"
+	case strings.Contains(odataType, "servicePrincipal"):
+		return "servicePrincipal"
+	case strings.Contains(odataType, "group"):
+		return "group"
+	default:
+		return "unknown"
+	}
+}
+
+// extractMemberProperties extracts relevant properties based on the member type
+func (g *GraphQuery) extractMemberProperties(additionalData map[string]interface{}, memberMap map[string]interface{}) string {
+	memberType := "unknown"
+
+	// Determine type from @odata.type
+	odataType, ok := g.extractStringProperty(additionalData, "@odata.type")
+	if !ok {
+		return memberType
+	}
+
+	// Get the member type
+	memberType = g.getMemberType(odataType)
+
+	// Extract type-specific properties
+	switch memberType {
+	case "user":
+		g.extractUserProperties(additionalData, memberMap)
+	case "servicePrincipal":
+		g.extractServicePrincipalProperties(additionalData, memberMap)
+	}
+
+	return memberType
+}
+
+// getGroupMembers retrieves all members of the specified group
+func (g *GraphQuery) getGroupMembers(ctx context.Context, client *msgraphsdk.GraphServiceClient, in *v1beta1.Input) (interface{}, error) {
+	// Validate input
+	if in.Group == nil || *in.Group == "" {
+		return nil, errors.New("no group name provided")
+	}
+
+	// Find the group
+	groupID, err := g.findGroupByName(ctx, client, *in.Group)
+	if err != nil {
+		return nil, err
+	}
+
+	// Fetch the members
+	memberObjects, err := g.fetchGroupMembers(ctx, client, *groupID, *in.Group)
+	if err != nil {
+		return nil, err
+	}
+
+	// Process the members
+	members := make([]interface{}, 0, len(memberObjects))
+
+	for _, member := range memberObjects {
+		memberID := member.GetId()
 		additionalData := member.GetAdditionalData()
-		if displayNameVal, exists := additionalData["displayName"]; exists && displayNameVal != nil {
-			// Debug output removed
-			if displayName, ok := displayNameVal.(string); ok {
-				memberMap["displayName"] = displayName
-			}
-		} else {
-			memberValue := reflect.ValueOf(member)
-			displayNameMethod := memberValue.MethodByName("GetDisplayName")
-			if displayNameMethod.IsValid() && displayNameMethod.Type().NumIn() == 0 {
-				// Debug output removed
-				results := displayNameMethod.Call(nil)
-				if len(results) > 0 && !results[0].IsNil() {
-					// Check if the result is a *string
-					if displayNamePtr, ok := results[0].Interface().(*string); ok && displayNamePtr != nil {
-						memberMap["displayName"] = *displayNamePtr
-					}
-				}
-			}
 
-			// If still no displayName, use a placeholder
-			if _, hasDisplayName := memberMap["displayName"]; !hasDisplayName {
-				// Debug output removed
-				memberMap["displayName"] = fmt.Sprintf("Member %s", *member.GetId())
-			}
+		// Create basic member info
+		memberMap := map[string]interface{}{
+			"id": memberID,
 		}
 
-		// Extract other properties more safely
-		if odataTypeVal, exists := additionalData["@odata.type"]; exists && odataTypeVal != nil {
-			if odataType, ok := odataTypeVal.(string); ok {
-				switch {
-				case strings.Contains(odataType, "user"):
-					memberType = "user"
-					// Extract user-specific properties more safely
-					if mailVal, exists := additionalData["mail"]; exists && mailVal != nil {
-						if mail, ok := mailVal.(string); ok {
-							memberMap["mail"] = mail
-						}
-					}
-					if upnVal, exists := additionalData["userPrincipalName"]; exists && upnVal != nil {
-						if upn, ok := upnVal.(string); ok {
-							memberMap["userPrincipalName"] = upn
-						}
-					}
-				case strings.Contains(odataType, "servicePrincipal"):
-					memberType = "servicePrincipal"
-					if appIDVal, exists := additionalData["appId"]; exists && appIDVal != nil {
-						if appID, ok := appIDVal.(string); ok {
-							memberMap["appId"] = appID
-						}
-					}
-				case strings.Contains(odataType, "group"):
-					memberType = "group"
-				}
-				memberMap["type"] = memberType
-			}
-		}
+		// Extract display name
+		memberMap["displayName"] = g.extractDisplayName(member, *memberID)
+
+		// Extract type-specific properties
+		memberType := g.extractMemberProperties(additionalData, memberMap)
+		memberMap["type"] = memberType
 
 		members = append(members, memberMap)
 	}
