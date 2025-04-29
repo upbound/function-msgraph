@@ -180,6 +180,11 @@ func (f *Function) checkStatusTargetHasData(req *fnv1.RunFunctionRequest, in *v1
 
 // executeQuery executes the query.
 func (f *Function) executeQuery(ctx context.Context, azureCreds map[string]string, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) (interface{}, error) {
+	// Initialize GraphQuery with logger if needed
+	if gq, ok := f.graphQuery.(*GraphQuery); ok {
+		gq.log = f.log
+	}
+
 	results, err := f.graphQuery.graphQuery(ctx, azureCreds, in)
 	if err != nil {
 		response.Fatal(rsp, err)
@@ -239,7 +244,9 @@ func getCreds(req *fnv1.RunFunctionRequest) (map[string]string, error) {
 
 // GraphQuery is a concrete implementation of the GraphQueryInterface
 // that interacts with Microsoft Graph API.
-type GraphQuery struct{}
+type GraphQuery struct {
+	log logging.Logger
+}
 
 // createGraphClient initializes a Microsoft Graph client using the provided credentials
 func (g *GraphQuery) createGraphClient(azureCreds map[string]string) (*msgraphsdk.GraphServiceClient, error) {
@@ -367,38 +374,65 @@ func (g *GraphQuery) findGroupByName(ctx context.Context, client *msgraphsdk.Gra
 
 // fetchGroupMembers fetches all members of a group by group ID
 func (g *GraphQuery) fetchGroupMembers(ctx context.Context, client *msgraphsdk.GraphServiceClient, groupID string, groupName string) ([]models.DirectoryObjectable, error) {
-	// Configure the members request
-	membersRequestConfig := &groups.ItemMembersRequestBuilderGetRequestConfiguration{
-		QueryParameters: &groups.ItemMembersRequestBuilderGetQueryParameters{},
+	// Create a request configuration that expands members
+	// This is the workaround for the known issue where service principals
+	// are not listed as group members in v1.0
+	// See: https://developer.microsoft.com/en-us/graph/known-issues/?search=25984
+	requestConfig := &groups.GroupItemRequestBuilderGetRequestConfiguration{
+		QueryParameters: &groups.GroupItemRequestBuilderGetQueryParameters{
+			Expand: []string{"members"},
+		},
 	}
 
-	// Select the fields we want
-	membersRequestConfig.QueryParameters.Select = []string{
-		"id", "displayName", "mail", "userPrincipalName",
-		"appId", "description", "objectType",
-	}
-
-	// Get the members
-	result, err := client.Groups().ByGroupId(groupID).Members().Get(ctx, membersRequestConfig)
+	// Get the group with expanded members using the workaround
+	// mentioned in the Microsoft documentation
+	group, err := client.Groups().ByGroupId(groupID).Get(ctx, requestConfig)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to get members for group %s", groupName)
 	}
-	
-	// Get raw response data directly
-	values := result.GetValue()
-	
-	// Hard-code types for users if we can identify them
-	// This is a workaround until we can understand what data the API provides
-	for _, obj := range values {
-		// Get additional data
-		additionalData := obj.GetAdditionalData()
-		
-		// Log the additional data for debugging
-		additionalDataStr, _ := json.Marshal(additionalData)
-		fmt.Printf("Member additional data: %s\n", additionalDataStr)
+
+	// Extract the members from the expanded result
+	var members []models.DirectoryObjectable
+	if group.GetMembers() != nil {
+		members = group.GetMembers()
 	}
 
-	return values, nil
+	// Log what we get directly from the API response
+	if g.log != nil {
+		// Log basic information about the response
+		g.log.Info("API Response Data (using $expand=members workaround)",
+			"groupID", groupID,
+			"groupName", groupName,
+			"memberCount", len(members))
+
+		// Log if we got members back
+		if len(members) > 0 {
+			g.log.Info(fmt.Sprintf("Found %d members in group %s", len(members), groupName))
+
+			// Log each member's raw data
+			for i, member := range members {
+				if i >= 5 {
+					// Limit logging to first 5 members
+					break
+				}
+
+				memberID := member.GetId()
+				additionalData := member.GetAdditionalData()
+				memberType := fmt.Sprintf("%T", member)
+
+				// Try to marshal this member's additional data
+				rawData, err := json.MarshalIndent(additionalData, "", "  ")
+				if err == nil {
+					g.log.Info(fmt.Sprintf("Member %d (ID: %s, Type: %s)", i, *memberID, memberType))
+					g.log.Info(string(rawData))
+				}
+			}
+		} else {
+			g.log.Info("No members found in the group using $expand method")
+		}
+	}
+
+	return members, nil
 }
 
 // extractDisplayName attempts to extract the display name from a directory object
@@ -460,50 +494,62 @@ func (g *GraphQuery) extractServicePrincipalProperties(additionalData map[string
 	}
 }
 
-// getMemberType determines the type of member based on odata.type
-func (g *GraphQuery) getMemberType(odataType string) string {
-	switch {
-	case strings.Contains(strings.ToLower(odataType), "user"):
-		return "user"
-	case strings.Contains(strings.ToLower(odataType), "serviceprincipal"):
-		return "servicePrincipal"
-	case strings.Contains(strings.ToLower(odataType), "group"):
-		return "group"
-	default:
-		return "unknown"
-	}
-}
+// processMember extracts member information into a map
+func (g *GraphQuery) processMember(member models.DirectoryObjectable) map[string]interface{} {
+	// Define constants for member types
+	const (
+		userType             = "user"
+		servicePrincipalType = "servicePrincipal"
+		unknownType          = "unknown"
+	)
 
-// extractMemberProperties extracts relevant properties based on the member type
-func (g *GraphQuery) extractMemberProperties(additionalData map[string]interface{}, memberMap map[string]interface{}) string {
-	memberType := "unknown"
+	memberID := member.GetId()
+	additionalData := member.GetAdditionalData()
 
-	// Try to determine type from @odata.type
-	odataType, ok := g.extractStringProperty(additionalData, "@odata.type")
-	if ok {
-		memberType = g.getMemberType(odataType)
-	} else {
-		// Fallback type detection based on available properties
-		_, hasUserPrincipalName := g.extractStringProperty(additionalData, "userPrincipalName")
-		_, hasMail := g.extractStringProperty(additionalData, "mail")
-		_, hasAppId := g.extractStringProperty(additionalData, "appId")
-		
-		if hasUserPrincipalName || hasMail {
-			memberType = "user"
-		} else if hasAppId {
-			memberType = "servicePrincipal"
-		}
+	// Create basic member info
+	memberMap := map[string]interface{}{
+		"id": memberID,
 	}
+
+	// Determine member type
+	memberType := unknownType
+
+	// Check properties that indicate user type
+	_, hasUserPrincipalName := g.extractStringProperty(additionalData, "userPrincipalName")
+	_, hasMail := g.extractStringProperty(additionalData, "mail")
+	if hasUserPrincipalName || hasMail {
+		memberType = userType
+	}
+
+	// Check properties that indicate service principal type
+	_, hasAppID := g.extractStringProperty(additionalData, "appId")
+	if hasAppID {
+		memberType = servicePrincipalType
+	}
+
+	// Try interface type checking for more accuracy
+	if _, ok := member.(models.Userable); ok {
+		memberType = userType
+	}
+	if _, ok := member.(models.ServicePrincipalable); ok {
+		memberType = servicePrincipalType
+	}
+
+	// Add type to member info
+	memberMap["type"] = memberType
+
+	// Extract display name
+	memberMap["displayName"] = g.extractDisplayName(member, *memberID)
 
 	// Extract type-specific properties
 	switch memberType {
-	case "user":
+	case userType:
 		g.extractUserProperties(additionalData, memberMap)
-	case "servicePrincipal":
+	case servicePrincipalType:
 		g.extractServicePrincipalProperties(additionalData, memberMap)
 	}
 
-	return memberType
+	return memberMap
 }
 
 // getGroupMembers retrieves all members of the specified group
@@ -527,53 +573,8 @@ func (g *GraphQuery) getGroupMembers(ctx context.Context, client *msgraphsdk.Gra
 
 	// Process the members
 	members := make([]interface{}, 0, len(memberObjects))
-
 	for _, member := range memberObjects {
-		memberID := member.GetId()
-		additionalData := member.GetAdditionalData()
-
-		// For debugging, log the raw additional data
-		additionalDataJSON, _ := json.Marshal(additionalData)
-		fmt.Printf("Member %s additional data: %s\n", *memberID, additionalDataJSON)
-
-		// Check if we can determine the member type using reflection
-		var memberType string = "unknown"
-		
-		// Force user type based on properties
-		_, hasUserPrincipalName := g.extractStringProperty(additionalData, "userPrincipalName")
-		_, hasMail := g.extractStringProperty(additionalData, "mail")
-		if hasUserPrincipalName || hasMail {
-			memberType = "user"
-		}
-		
-		// Try to use model interfaces instead of additionalData
-		// Try to cast to user
-		if user, ok := member.(models.Userable); ok && user != nil {
-			memberType = "user"
-		}
-		
-		// Try to cast to service principal
-		if sp, ok := member.(models.ServicePrincipalable); ok && sp != nil {
-			memberType = "servicePrincipal"
-		}
-		
-		// Create basic member info
-		memberMap := map[string]interface{}{
-			"id":   memberID,
-			"type": memberType,
-		}
-
-		// Extract display name
-		memberMap["displayName"] = g.extractDisplayName(member, *memberID)
-
-		// Extract type-specific properties based on determined type
-		switch memberType {
-		case "user":
-			g.extractUserProperties(additionalData, memberMap)
-		case "servicePrincipal":
-			g.extractServicePrincipalProperties(additionalData, memberMap)
-		}
-
+		memberMap := g.processMember(member)
 		members = append(members, memberMap)
 	}
 
