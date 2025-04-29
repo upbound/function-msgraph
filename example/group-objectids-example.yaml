@@ -23,6 +23,7 @@ spec:
           - "Developers"
           - "All Engineering"
           - "All Company"
+          - test-fn-msgraph
         target: "status.groupObjectIDs"
         skipQueryWhenTargetHasData: true
       credentials:

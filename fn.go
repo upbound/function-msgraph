@@ -397,39 +397,9 @@ func (g *GraphQuery) fetchGroupMembers(ctx context.Context, client *msgraphsdk.G
 		members = group.GetMembers()
 	}
 
-	// Log what we get directly from the API response
+	// Log basic information about the membership
 	if g.log != nil {
-		// Log basic information about the response
-		g.log.Info("API Response Data (using $expand=members workaround)",
-			"groupID", groupID,
-			"groupName", groupName,
-			"memberCount", len(members))
-
-		// Log if we got members back
-		if len(members) > 0 {
-			g.log.Info(fmt.Sprintf("Found %d members in group %s", len(members), groupName))
-
-			// Log each member's raw data
-			for i, member := range members {
-				if i >= 5 {
-					// Limit logging to first 5 members
-					break
-				}
-
-				memberID := member.GetId()
-				additionalData := member.GetAdditionalData()
-				memberType := fmt.Sprintf("%T", member)
-
-				// Try to marshal this member's additional data
-				rawData, err := json.MarshalIndent(additionalData, "", "  ")
-				if err == nil {
-					g.log.Info(fmt.Sprintf("Member %d (ID: %s, Type: %s)", i, *memberID, memberType))
-					g.log.Info(string(rawData))
-				}
-			}
-		} else {
-			g.log.Info("No members found in the group using $expand method")
-		}
+		g.log.Debug("Retrieved group members", "groupName", groupName, "groupID", groupID, "memberCount", len(members))
 	}
 
 	return members, nil

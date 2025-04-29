@@ -21,7 +21,7 @@ spec:
         apiVersion: msgraph.fn.crossplane.io/v1alpha1
         kind: Input
         queryType: GroupMembership
-        group: "All Company"
+        group: test-fn-msgraph
         # The function will automatically select standard fields:
         # - id, displayName, mail, userPrincipalName, appId, description
         target: "status.groupMembers"

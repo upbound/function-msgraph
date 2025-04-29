@@ -18,7 +18,7 @@ spec:
         servicePrincipals:
           - "MyServiceApp"
           - "ApiConnector"
-          - "dare-oidc-provider"
+          - "yury-upbound-oidc-provider"
         target: "status.servicePrincipalDetails"
         skipQueryWhenTargetHasData: true
       credentials:
