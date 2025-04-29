@@ -619,6 +619,321 @@ func TestResolveGroupRef(t *testing.T) {
 	}
 }
 
+// TestResolveUsersRef tests the functionality of resolving usersRef from context or status
+func TestResolveUsersRef(t *testing.T) {
+	var (
+		xr    = `{"apiVersion":"example.org/v1","kind":"XR","metadata":{"name":"cool-xr"},"spec":{"count":2}}`
+		creds = &fnv1.CredentialData{
+			Data: map[string][]byte{
+				"credentials": []byte(`{
+"clientId": "test-client-id",
+"clientSecret": "test-client-secret",
+"subscriptionId": "test-subscription-id",
+"tenantId": "test-tenant-id"
+}`),
+			},
+		}
+	)
+
+	type args struct {
+		ctx context.Context
+		req *fnv1.RunFunctionRequest
+	}
+	type want struct {
+		rsp *fnv1.RunFunctionResponse
+		err error
+	}
+
+	cases := map[string]struct {
+		reason string
+		args   args
+		want   want
+	}{
+		"UsersRefFromStatus": {
+			reason: "The Function should resolve usersRef from XR status",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"usersRef": "status.users",
+						"target": "status.validatedUsers"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"status": {
+									"users": ["user1@example.com", "user2@example.com", "admin@example.onmicrosoft.com"]
+								}
+							}`),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "UserValidation"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"status": {
+									"users": ["user1@example.com", "user2@example.com", "admin@example.onmicrosoft.com"],
+									"validatedUsers": [
+										{
+											"id": "user-id-1",
+											"displayName": "User 1",
+											"userPrincipalName": "user1@example.com",
+											"mail": "user1@example.com"
+										},
+										{
+											"id": "user-id-2",
+											"displayName": "User 2",
+											"userPrincipalName": "user2@example.com",
+											"mail": "user2@example.com"
+										},
+										{
+											"id": "admin-id",
+											"displayName": "Admin User",
+											"userPrincipalName": "admin@example.onmicrosoft.com",
+											"mail": "admin@example.onmicrosoft.com"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"UsersRefFromContext": {
+			reason: "The Function should resolve usersRef from context",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"usersRef": "context.users",
+						"target": "status.validatedUsers"
+					}`),
+					Context: resource.MustStructJSON(`{
+						"users": ["user1@example.com", "user2@example.com", "admin@example.onmicrosoft.com"]
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "UserValidation"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Context: resource.MustStructJSON(`{
+						"users": ["user1@example.com", "user2@example.com", "admin@example.onmicrosoft.com"]
+					}`),
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"metadata": {
+									"name": "cool-xr"
+								},
+								"status": {
+									"validatedUsers": [
+										{
+											"id": "user-id-1",
+											"displayName": "User 1",
+											"userPrincipalName": "user1@example.com",
+											"mail": "user1@example.com"
+										},
+										{
+											"id": "user-id-2",
+											"displayName": "User 2",
+											"userPrincipalName": "user2@example.com",
+											"mail": "user2@example.com"
+										},
+										{
+											"id": "admin-id",
+											"displayName": "Admin User",
+											"userPrincipalName": "admin@example.onmicrosoft.com",
+											"mail": "admin@example.onmicrosoft.com"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"UsersRefNotFound": {
+			reason: "The Function should handle an error when usersRef cannot be resolved",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"usersRef": "context.nonexistent.value",
+						"target": "status.validatedUsers"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  "cannot resolve usersRef: context.nonexistent.value not found",
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"metadata": {
+									"name": "cool-xr"
+								}
+							}`),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			// Create mock responders for each type of query
+			mockQuery := &MockGraphQuery{
+				GraphQueryFunc: func(_ context.Context, _ map[string]string, in *v1beta1.Input) (interface{}, error) {
+					if in.QueryType == "UserValidation" {
+						if len(in.Users) == 0 {
+							return nil, errors.New("no users provided for validation")
+						}
+
+						var results []interface{}
+						for _, user := range in.Users {
+							if user == nil {
+								continue
+							}
+
+							var (
+								userID      string
+								displayName string
+							)
+
+							// Generate different test data based on user principal name
+							switch *user {
+							case "user1@example.com":
+								userID = "user-id-1"
+								displayName = "User 1"
+							case "user2@example.com":
+								userID = "user-id-2"
+								displayName = "User 2"
+							case "admin@example.onmicrosoft.com":
+								userID = "admin-id"
+								displayName = "Admin User"
+							default:
+								userID = "test-user-id"
+								displayName = "Test User"
+							}
+
+							userMap := map[string]interface{}{
+								"id":                userID,
+								"displayName":       displayName,
+								"userPrincipalName": *user,
+								"mail":              *user,
+							}
+							results = append(results, userMap)
+						}
+						return results, nil
+					}
+					return nil, errors.Errorf("unsupported query type: %s", in.QueryType)
+				},
+			}
+
+			f := &Function{
+				graphQuery: mockQuery,
+				log:        logging.NewNopLogger(),
+			}
+			rsp, err := f.RunFunction(tc.args.ctx, tc.args.req)
+
+			if diff := cmp.Diff(tc.want.rsp, rsp, protocmp.Transform()); diff != "" {
+				t.Errorf("%s\nf.RunFunction(...): -want rsp, +got rsp:\n%s", tc.reason, diff)
+			}
+
+			if diff := cmp.Diff(tc.want.err, err, cmpopts.EquateErrors()); diff != "" {
+				t.Errorf("%s\nf.RunFunction(...): -want err, +got err:\n%s", tc.reason, diff)
+			}
+		})
+	}
+}
+
 func TestRunFunction(t *testing.T) {
 
 	var (

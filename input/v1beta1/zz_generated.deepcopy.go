@@ -24,6 +24,11 @@ func (in *Input) DeepCopyInto(out *Input) {
 			}
 		}
 	}
+	if in.UsersRef != nil {
+		in, out := &in.UsersRef, &out.UsersRef
+		*out = new(string)
+		**out = **in
+	}
 	if in.Groups != nil {
 		in, out := &in.Groups, &out.Groups
 		*out = make([]*string, len(*in))

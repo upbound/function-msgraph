@@ -42,6 +42,16 @@ Validate if specified Azure AD users exist:
 crossplane render xr.yaml user-validation-example.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc
 ```
 
+Dynamic `usersRef` variations:
+
+```shell
+crossplane render xr.yaml user-validation-example-status-ref.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc
+```
+
+```shell
+crossplane render xr.yaml user-validation-example-context-ref.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc --extra-resources=envconfig.yaml
+```
+
 ### 2. Group Membership
 
 Get all members of a specified Azure AD group:

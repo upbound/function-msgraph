@@ -7,3 +7,5 @@ data:
     name: test-fn-msgraph
   groups:
     - test-fn-msgraph
+  users:
+    - yury@upbound.io

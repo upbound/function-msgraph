@@ -80,6 +80,11 @@ spec:
             items:
               type: string
             type: array
+          usersRef:
+            description: |-
+              UsersRef is a reference to retrieve the user names (e.g., from status or context)
+              Overrides Users field if used
+            type: string
         required:
         - queryType
         - target

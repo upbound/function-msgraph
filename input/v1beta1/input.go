@@ -27,6 +27,11 @@ type Input struct {
 	// +optional
 	Users []*string `json:"users,omitempty"`
 
+	// UsersRef is a reference to retrieve the user names (e.g., from status or context)
+	// Overrides Users field if used
+	// +optional
+	UsersRef *string `json:"usersRef,omitempty"`
+
 	// Groups is a list of group names for group object ID queries
 	// +optional
 	Groups []*string `json:"groups,omitempty"`

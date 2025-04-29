@@ -1,0 +1,30 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: user-validation-example-status-ref
+  annotations:
+    # Important: This function requires an Azure AD app registration with Microsoft Graph API permissions:
+    # - User.Read.All
+    # - Directory.Read.All
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1
+    kind: XR
+  mode: Pipeline
+  pipeline:
+    - step: validate-users
+      functionRef:
+        name: function-msgraph
+      input:
+        apiVersion: msgraph.fn.crossplane.io/v1alpha1
+        kind: Input
+        queryType: UserValidation
+        usersRef: status.users
+        target: "status.validatedUsers"
+        skipQueryWhenTargetHasData: true
+      credentials:
+        - name: azure-creds
+          source: Secret
+          secretRef:
+            namespace: upbound-system
+            name: azure-account-creds

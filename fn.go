@@ -887,30 +887,65 @@ func (f *Function) validateAndPrepareInput(_ context.Context, req *fnv1.RunFunct
 	return true
 }
 
-// processReferences handles resolving references like groupRef and groupsRef
+// processReferences handles resolving references like groupRef, groupsRef, and usersRef
 func (f *Function) processReferences(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) bool {
-	// Process groupRef if it exists for GroupMembership query type
-	if in.QueryType == "GroupMembership" && in.GroupRef != nil && *in.GroupRef != "" {
-		groupName, err := f.resolveGroupRef(req, in.GroupRef)
-		if err != nil {
-			response.Fatal(rsp, err)
-			return false
-		}
-		in.Group = &groupName
-		f.log.Info("Resolved GroupRef to group", "group", groupName, "groupRef", *in.GroupRef)
+	// Process references based on query type
+	switch in.QueryType {
+	case "GroupMembership":
+		return f.processGroupRef(req, in, rsp)
+	case "GroupObjectIDs":
+		return f.processGroupsRef(req, in, rsp)
+	case "UserValidation":
+		return f.processUsersRef(req, in, rsp)
+	}
+	return true
+}
+
+// processGroupRef handles resolving the groupRef reference for GroupMembership query type
+func (f *Function) processGroupRef(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) bool {
+	if in.GroupRef == nil || *in.GroupRef == "" {
+		return true
 	}
 
-	// Process groupsRef if it exists for GroupObjectIDs query type
-	if in.QueryType == "GroupObjectIDs" && in.GroupsRef != nil && *in.GroupsRef != "" {
-		groupNames, err := f.resolveGroupsRef(req, in.GroupsRef)
-		if err != nil {
-			response.Fatal(rsp, err)
-			return false
-		}
-		in.Groups = groupNames
-		f.log.Info("Resolved GroupsRef to groups", "groupCount", len(groupNames), "groupsRef", *in.GroupsRef)
+	groupName, err := f.resolveGroupRef(req, in.GroupRef)
+	if err != nil {
+		response.Fatal(rsp, err)
+		return false
+	}
+	in.Group = &groupName
+	f.log.Info("Resolved GroupRef to group", "group", groupName, "groupRef", *in.GroupRef)
+	return true
+}
+
+// processGroupsRef handles resolving the groupsRef reference for GroupObjectIDs query type
+func (f *Function) processGroupsRef(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) bool {
+	if in.GroupsRef == nil || *in.GroupsRef == "" {
+		return true
 	}
 
+	groupNames, err := f.resolveGroupsRef(req, in.GroupsRef)
+	if err != nil {
+		response.Fatal(rsp, err)
+		return false
+	}
+	in.Groups = groupNames
+	f.log.Info("Resolved GroupsRef to groups", "groupCount", len(groupNames), "groupsRef", *in.GroupsRef)
+	return true
+}
+
+// processUsersRef handles resolving the usersRef reference for UserValidation query type
+func (f *Function) processUsersRef(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) bool {
+	if in.UsersRef == nil || *in.UsersRef == "" {
+		return true
+	}
+
+	userNames, err := f.resolveUsersRef(req, in.UsersRef)
+	if err != nil {
+		response.Fatal(rsp, err)
+		return false
+	}
+	in.Users = userNames
+	f.log.Info("Resolved UsersRef to users", "userCount", len(userNames), "usersRef", *in.UsersRef)
 	return true
 }
 
@@ -1018,27 +1053,41 @@ func (f *Function) resolveFromContext(req *fnv1.RunFunctionRequest, refKey strin
 	return value, nil
 }
 
-// resolveGroupsRef resolves a list of group names from a reference in status or context.
-func (f *Function) resolveGroupsRef(req *fnv1.RunFunctionRequest, groupsRef *string) ([]*string, error) {
-	if groupsRef == nil || *groupsRef == "" {
-		return nil, errors.New("empty groupsRef provided")
+// resolveStringArrayRef resolves a list of string values from a reference in status or context
+func (f *Function) resolveStringArrayRef(req *fnv1.RunFunctionRequest, ref *string, refType string) ([]*string, error) {
+	if ref == nil || *ref == "" {
+		return nil, errors.Errorf("empty %s provided", refType)
 	}
 
-	refKey := *groupsRef
+	refKey := *ref
+
+	var (
+		result []*string
+		err    error
+	)
 
 	// Use proper switch statement instead of if-else chain
 	switch {
 	case strings.HasPrefix(refKey, "status."):
-		return f.resolveGroupsFromStatus(req, refKey)
+		result, err = f.resolveStringArrayFromStatus(req, refKey)
 	case strings.HasPrefix(refKey, "context."):
-		return f.resolveGroupsFromContext(req, refKey)
+		result, err = f.resolveStringArrayFromContext(req, refKey)
 	default:
-		return nil, errors.Errorf("unsupported groupsRef format: %s", refKey)
+		return nil, errors.Errorf("unsupported %s format: %s", refType, refKey)
 	}
+
+	// If we got an error and it contains "groupsRef" but we're looking for a different ref type,
+	// replace it with the correct ref type
+	if err != nil && refType != "groupsRef" && strings.Contains(err.Error(), "groupsRef") {
+		errMsg := err.Error()
+		return nil, errors.New(strings.ReplaceAll(errMsg, "groupsRef", refType))
+	}
+
+	return result, err
 }
 
-// resolveGroupsFromStatus resolves a list of group names from XR status
-func (f *Function) resolveGroupsFromStatus(req *fnv1.RunFunctionRequest, refKey string) ([]*string, error) {
+// resolveStringArrayFromStatus resolves a list of string values from XR status
+func (f *Function) resolveStringArrayFromStatus(req *fnv1.RunFunctionRequest, refKey string) ([]*string, error) {
 	xrStatus, _, err := f.getXRAndStatus(req)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot get XR status")
@@ -1048,11 +1097,21 @@ func (f *Function) resolveGroupsFromStatus(req *fnv1.RunFunctionRequest, refKey 
 	return f.extractStringArrayFromMap(xrStatus, statusField, refKey)
 }
 
-// resolveGroupsFromContext resolves a list of group names from function context
-func (f *Function) resolveGroupsFromContext(req *fnv1.RunFunctionRequest, refKey string) ([]*string, error) {
+// resolveStringArrayFromContext resolves a list of string values from function context
+func (f *Function) resolveStringArrayFromContext(req *fnv1.RunFunctionRequest, refKey string) ([]*string, error) {
 	contextMap := req.GetContext().AsMap()
 	contextField := strings.TrimPrefix(refKey, "context.")
 	return f.extractStringArrayFromMap(contextMap, contextField, refKey)
+}
+
+// resolveGroupsRef resolves a list of group names from a reference in status or context
+func (f *Function) resolveGroupsRef(req *fnv1.RunFunctionRequest, groupsRef *string) ([]*string, error) {
+	return f.resolveStringArrayRef(req, groupsRef, "groupsRef")
+}
+
+// resolveUsersRef resolves a list of user names from a reference in status or context
+func (f *Function) resolveUsersRef(req *fnv1.RunFunctionRequest, usersRef *string) ([]*string, error) {
+	return f.resolveStringArrayRef(req, usersRef, "usersRef")
 }
 
 // extractStringArrayFromMap extracts a string array from a map using nested key
