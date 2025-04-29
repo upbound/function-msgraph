@@ -35,6 +35,11 @@ type Input struct {
 	// +optional
 	Group *string `json:"group,omitempty"`
 
+	// GroupRef is a reference to retrieve the group name (e.g., from status or context)
+	// Overrides Group field if used
+	// +optional
+	GroupRef *string `json:"groupRef,omitempty"`
+
 	// ServicePrincipals is a list of service principal names
 	// +optional
 	ServicePrincipals []*string `json:"servicePrincipals,omitempty"`

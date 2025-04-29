@@ -40,6 +40,11 @@ func (in *Input) DeepCopyInto(out *Input) {
 		*out = new(string)
 		**out = **in
 	}
+	if in.GroupRef != nil {
+		in, out := &in.GroupRef, &out.GroupRef
+		*out = new(string)
+		**out = **in
+	}
 	if in.ServicePrincipals != nil {
 		in, out := &in.ServicePrincipals, &out.ServicePrincipals
 		*out = make([]*string, len(*in))

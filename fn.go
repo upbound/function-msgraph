@@ -46,42 +46,25 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 
 	rsp := response.To(req, response.DefaultTTL)
 
-	// Ensure oxr to dxr gets propagated and we keep status around
-	if err := f.propagateDesiredXR(req, rsp); err != nil {
-		return rsp, nil //nolint:nilerr // errors are handled in rsp. We should not error main function and proceed with reconciliation
+	// Initialize response with desired XR and preserve context
+	if err := f.initializeResponse(req, rsp); err != nil {
+		return rsp, nil //nolint:nilerr // errors are handled in rsp
 	}
-	// Ensure the context is preserved
-	f.preserveContext(req, rsp)
 
 	// Parse input and get credentials
 	in, azureCreds, err := f.parseInputAndCredentials(req, rsp)
 	if err != nil {
-		return rsp, nil //nolint:nilerr // errors are handled in rsp. We should not error main function and proceed with reconciliation
+		return rsp, nil //nolint:nilerr // errors are handled in rsp
 	}
 
-	// Check if target is valid
-	if !f.isValidTarget(in.Target) {
-		response.Fatal(rsp, errors.Errorf("Unrecognized target field: %s", in.Target))
-		return rsp, nil
+	// Validate and prepare input
+	if !f.validateAndPrepareInput(ctx, req, in, rsp) {
+		return rsp, nil // Early return if validation failed or query should be skipped
 	}
 
-	// Check if we should skip the query
-	if f.shouldSkipQuery(req, in, rsp) {
-		// Set success condition
-		response.ConditionTrue(rsp, "FunctionSuccess", "Success").
-			TargetCompositeAndClaim()
-		return rsp, nil
-	}
-
-	// Execute the query
-	results, err := f.executeQuery(ctx, azureCreds, in, rsp)
-	if err != nil {
-		return rsp, nil //nolint:nilerr // errors are handled in rsp. We should not error main function and proceed with reconciliation
-	}
-
-	// Process the results
-	if err := f.processResults(req, in, results, rsp); err != nil {
-		return rsp, nil //nolint:nilerr // errors are handled in rsp. We should not error main function and proceed with reconciliation
+	// Execute the query and process results
+	if !f.executeAndProcessQuery(ctx, req, in, azureCreds, rsp) {
+		return rsp, nil // Error already handled in response
 	}
 
 	// Set success condition
@@ -524,19 +507,24 @@ func (g *GraphQuery) processMember(member models.DirectoryObjectable) map[string
 
 // getGroupMembers retrieves all members of the specified group
 func (g *GraphQuery) getGroupMembers(ctx context.Context, client *msgraphsdk.GraphServiceClient, in *v1beta1.Input) (interface{}, error) {
-	// Validate input
-	if in.Group == nil || *in.Group == "" {
+	// Determine the group name to use
+	var groupName string
+
+	// Check if we have a group name (either directly or resolved from GroupRef)
+	if in.Group != nil && *in.Group != "" {
+		groupName = *in.Group
+	} else {
 		return nil, errors.New("no group name provided")
 	}
 
 	// Find the group
-	groupID, err := g.findGroupByName(ctx, client, *in.Group)
+	groupID, err := g.findGroupByName(ctx, client, groupName)
 	if err != nil {
 		return nil, err
 	}
 
 	// Fetch the members
-	memberObjects, err := g.fetchGroupMembers(ctx, client, *groupID, *in.Group)
+	memberObjects, err := g.fetchGroupMembers(ctx, client, *groupID, groupName)
 	if err != nil {
 		return nil, err
 	}
@@ -864,6 +852,63 @@ func (f *Function) preserveContext(req *fnv1.RunFunctionRequest, rsp *fnv1.RunFu
 	}
 }
 
+// initializeResponse initializes the response with desired XR and preserves context
+func (f *Function) initializeResponse(req *fnv1.RunFunctionRequest, rsp *fnv1.RunFunctionResponse) error {
+	// Ensure oxr to dxr gets propagated and we keep status around
+	if err := f.propagateDesiredXR(req, rsp); err != nil {
+		return err
+	}
+	// Ensure the context is preserved
+	f.preserveContext(req, rsp)
+	return nil
+}
+
+// validateAndPrepareInput validates the input and prepares it for execution
+func (f *Function) validateAndPrepareInput(_ context.Context, req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) bool {
+	// Check if target is valid
+	if !f.isValidTarget(in.Target) {
+		response.Fatal(rsp, errors.Errorf("Unrecognized target field: %s", in.Target))
+		return false
+	}
+
+	// Check if we should skip the query
+	if f.shouldSkipQuery(req, in, rsp) {
+		// Set success condition
+		response.ConditionTrue(rsp, "FunctionSuccess", "Success").
+			TargetCompositeAndClaim()
+		return false
+	}
+
+	// Process groupRef if it exists for GroupMembership query type
+	if in.QueryType == "GroupMembership" && in.GroupRef != nil && *in.GroupRef != "" {
+		groupName, err := f.resolveGroupRef(req, in.GroupRef)
+		if err != nil {
+			response.Fatal(rsp, err)
+			return false
+		}
+		in.Group = &groupName
+		f.log.Info("Resolved GroupRef to group", "group", groupName, "groupRef", *in.GroupRef)
+	}
+
+	return true
+}
+
+// executeAndProcessQuery executes the query and processes the results
+func (f *Function) executeAndProcessQuery(ctx context.Context, req *fnv1.RunFunctionRequest, in *v1beta1.Input, azureCreds map[string]string, rsp *fnv1.RunFunctionResponse) bool {
+	// Execute the query
+	results, err := f.executeQuery(ctx, azureCreds, in, rsp)
+	if err != nil {
+		return false
+	}
+
+	// Process the results
+	if err := f.processResults(req, in, results, rsp); err != nil {
+		return false
+	}
+
+	return true
+}
+
 // isValidTarget checks if the target is valid
 func (f *Function) isValidTarget(target string) bool {
 	return strings.HasPrefix(target, "status.") || strings.HasPrefix(target, "context.")
@@ -905,4 +950,49 @@ func (f *Function) checkContextTargetHasData(req *fnv1.RunFunctionRequest, in *v
 		return true
 	}
 	return false
+}
+
+// resolveGroupRef resolves the group name from a reference in status or context.
+func (f *Function) resolveGroupRef(req *fnv1.RunFunctionRequest, groupRef *string) (string, error) {
+	if groupRef == nil || *groupRef == "" {
+		return "", errors.New("empty groupRef provided")
+	}
+
+	refKey := *groupRef
+
+	// Use a proper switch statement instead of if-else chain
+	switch {
+	case strings.HasPrefix(refKey, "status."):
+		return f.resolveFromStatus(req, refKey)
+	case strings.HasPrefix(refKey, "context."):
+		return f.resolveFromContext(req, refKey)
+	default:
+		return "", errors.Errorf("unsupported groupRef format: %s", refKey)
+	}
+}
+
+// resolveFromStatus resolves a reference from XR status
+func (f *Function) resolveFromStatus(req *fnv1.RunFunctionRequest, refKey string) (string, error) {
+	xrStatus, _, err := f.getXRAndStatus(req)
+	if err != nil {
+		return "", errors.Wrap(err, "cannot get XR status")
+	}
+
+	statusField := strings.TrimPrefix(refKey, "status.")
+	value, ok := GetNestedKey(xrStatus, statusField)
+	if !ok {
+		return "", errors.Errorf("cannot resolve groupRef: %s not found", refKey)
+	}
+	return value, nil
+}
+
+// resolveFromContext resolves a reference from function context
+func (f *Function) resolveFromContext(req *fnv1.RunFunctionRequest, refKey string) (string, error) {
+	contextMap := req.GetContext().AsMap()
+	contextField := strings.TrimPrefix(refKey, "context.")
+	value, ok := GetNestedKey(contextMap, contextField)
+	if !ok {
+		return "", errors.Errorf("cannot resolve groupRef: %s not found", refKey)
+	}
+	return value, nil
 }

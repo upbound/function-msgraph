@@ -50,6 +50,16 @@ Get all members of a specified Azure AD group:
 crossplane render xr.yaml group-membership-example.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc
 ```
 
+Dynamic `groupRef` variations:
+
+```shell
+crossplane render xr.yaml group-membership-example-status-ref.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc
+```
+
+```shell
+crossplane render xr.yaml group-membership-example-context-ref.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc --extra-resources=envconfig.yaml
+```
+
 ### 3. Group Object IDs
 
 Get object IDs for specified Azure AD groups:

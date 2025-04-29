@@ -31,6 +31,11 @@ spec:
           group:
             description: Group is a single group name for group membership queries
             type: string
+          groupRef:
+            description: |-
+              GroupRef is a reference to retrieve the group name (e.g., from status or context)
+              Overrides Group field if used
+            type: string
           groups:
             description: Groups is a list of group names for group object ID queries
             items:

@@ -4,3 +4,6 @@ kind: XR
 metadata:
   name: example-xr
 spec: {}
+status:
+  group:
+    name: test-fn-msgraph
