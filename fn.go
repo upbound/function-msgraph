@@ -887,7 +887,7 @@ func (f *Function) validateAndPrepareInput(_ context.Context, req *fnv1.RunFunct
 	return true
 }
 
-// processReferences handles resolving references like groupRef, groupsRef, and usersRef
+// processReferences handles resolving references like groupRef, groupsRef, usersRef, and servicePrincipalsRef
 func (f *Function) processReferences(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) bool {
 	// Process references based on query type
 	switch in.QueryType {
@@ -897,6 +897,8 @@ func (f *Function) processReferences(req *fnv1.RunFunctionRequest, in *v1beta1.I
 		return f.processGroupsRef(req, in, rsp)
 	case "UserValidation":
 		return f.processUsersRef(req, in, rsp)
+	case "ServicePrincipalDetails":
+		return f.processServicePrincipalsRef(req, in, rsp)
 	}
 	return true
 }
@@ -946,6 +948,22 @@ func (f *Function) processUsersRef(req *fnv1.RunFunctionRequest, in *v1beta1.Inp
 	}
 	in.Users = userNames
 	f.log.Info("Resolved UsersRef to users", "userCount", len(userNames), "usersRef", *in.UsersRef)
+	return true
+}
+
+// processServicePrincipalsRef handles resolving the servicePrincipalsRef reference for ServicePrincipalDetails query type
+func (f *Function) processServicePrincipalsRef(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) bool {
+	if in.ServicePrincipalsRef == nil || *in.ServicePrincipalsRef == "" {
+		return true
+	}
+
+	spNames, err := f.resolveServicePrincipalsRef(req, in.ServicePrincipalsRef)
+	if err != nil {
+		response.Fatal(rsp, err)
+		return false
+	}
+	in.ServicePrincipals = spNames
+	f.log.Info("Resolved ServicePrincipalsRef to service principals", "spCount", len(spNames), "servicePrincipalsRef", *in.ServicePrincipalsRef)
 	return true
 }
 
@@ -1112,6 +1130,11 @@ func (f *Function) resolveGroupsRef(req *fnv1.RunFunctionRequest, groupsRef *str
 // resolveUsersRef resolves a list of user names from a reference in status or context
 func (f *Function) resolveUsersRef(req *fnv1.RunFunctionRequest, usersRef *string) ([]*string, error) {
 	return f.resolveStringArrayRef(req, usersRef, "usersRef")
+}
+
+// resolveServicePrincipalsRef resolves a list of service principal names from a reference in status or context
+func (f *Function) resolveServicePrincipalsRef(req *fnv1.RunFunctionRequest, servicePrincipalsRef *string) ([]*string, error) {
+	return f.resolveStringArrayRef(req, servicePrincipalsRef, "servicePrincipalsRef")
 }
 
 // extractStringArrayFromMap extracts a string array from a map using nested key

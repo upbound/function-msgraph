@@ -934,6 +934,326 @@ func TestResolveUsersRef(t *testing.T) {
 	}
 }
 
+// TestResolveServicePrincipalsRef tests the functionality of resolving servicePrincipalsRef from context or status
+func TestResolveServicePrincipalsRef(t *testing.T) {
+	var (
+		xr    = `{"apiVersion":"example.org/v1","kind":"XR","metadata":{"name":"cool-xr"},"spec":{"count":2}}`
+		creds = &fnv1.CredentialData{
+			Data: map[string][]byte{
+				"credentials": []byte(`{
+"clientId": "test-client-id",
+"clientSecret": "test-client-secret",
+"subscriptionId": "test-subscription-id",
+"tenantId": "test-tenant-id"
+}`),
+			},
+		}
+	)
+
+	type args struct {
+		ctx context.Context
+		req *fnv1.RunFunctionRequest
+	}
+	type want struct {
+		rsp *fnv1.RunFunctionResponse
+		err error
+	}
+
+	cases := map[string]struct {
+		reason string
+		args   args
+		want   want
+	}{
+		"ServicePrincipalsRefFromStatus": {
+			reason: "The Function should resolve servicePrincipalsRef from XR status",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "ServicePrincipalDetails",
+						"servicePrincipalsRef": "status.servicePrincipalNames",
+						"target": "status.servicePrincipals"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"status": {
+									"servicePrincipalNames": ["MyServiceApp", "ApiConnector", "yury-upbound-oidc-provider"]
+								}
+							}`),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "ServicePrincipalDetails"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"status": {
+									"servicePrincipalNames": ["MyServiceApp", "ApiConnector", "yury-upbound-oidc-provider"],
+									"servicePrincipals": [
+										{
+											"id": "sp-id-1",
+											"appId": "app-id-1",
+											"displayName": "MyServiceApp",
+											"description": "Service application"
+										},
+										{
+											"id": "sp-id-2",
+											"appId": "app-id-2",
+											"displayName": "ApiConnector",
+											"description": "API connector application"
+										},
+										{
+											"id": "sp-id-3",
+											"appId": "app-id-3",
+											"displayName": "yury-upbound-oidc-provider",
+											"description": "OIDC provider application"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"ServicePrincipalsRefFromContext": {
+			reason: "The Function should resolve servicePrincipalsRef from context",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "ServicePrincipalDetails",
+						"servicePrincipalsRef": "context.servicePrincipalNames",
+						"target": "status.servicePrincipals"
+					}`),
+					Context: resource.MustStructJSON(`{
+						"servicePrincipalNames": ["MyServiceApp", "ApiConnector", "yury-upbound-oidc-provider"]
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "ServicePrincipalDetails"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Context: resource.MustStructJSON(`{
+						"servicePrincipalNames": ["MyServiceApp", "ApiConnector", "yury-upbound-oidc-provider"]
+					}`),
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"metadata": {
+									"name": "cool-xr"
+								},
+								"status": {
+									"servicePrincipals": [
+										{
+											"id": "sp-id-1",
+											"appId": "app-id-1",
+											"displayName": "MyServiceApp",
+											"description": "Service application"
+										},
+										{
+											"id": "sp-id-2",
+											"appId": "app-id-2",
+											"displayName": "ApiConnector",
+											"description": "API connector application"
+										},
+										{
+											"id": "sp-id-3",
+											"appId": "app-id-3",
+											"displayName": "yury-upbound-oidc-provider",
+											"description": "OIDC provider application"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"ServicePrincipalsRefNotFound": {
+			reason: "The Function should handle an error when servicePrincipalsRef cannot be resolved",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "ServicePrincipalDetails",
+						"servicePrincipalsRef": "context.nonexistent.value",
+						"target": "status.servicePrincipals"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  "cannot resolve servicePrincipalsRef: context.nonexistent.value not found",
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"metadata": {
+									"name": "cool-xr"
+								}
+							}`),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			// Create mock responders for each type of query
+			mockQuery := &MockGraphQuery{
+				GraphQueryFunc: func(_ context.Context, _ map[string]string, in *v1beta1.Input) (interface{}, error) {
+					if in.QueryType == "ServicePrincipalDetails" {
+						if len(in.ServicePrincipals) == 0 {
+							return nil, errors.New("no service principal names provided")
+						}
+
+						var results []interface{}
+						for i, sp := range in.ServicePrincipals {
+							if sp == nil {
+								continue
+							}
+
+							var (
+								spID        string
+								appID       string
+								description string
+							)
+
+							// Generate different test data based on service principal name
+							switch *sp {
+							case "MyServiceApp":
+								spID = "sp-id-1"
+								appID = "app-id-1"
+								description = "Service application"
+							case "ApiConnector":
+								spID = "sp-id-2"
+								appID = "app-id-2"
+								description = "API connector application"
+							case "yury-upbound-oidc-provider":
+								spID = "sp-id-3"
+								appID = "app-id-3"
+								description = "OIDC provider application"
+							default:
+								spID = fmt.Sprintf("sp-id-%d", i+1)
+								appID = fmt.Sprintf("app-id-%d", i+1)
+								description = "Generic service principal"
+							}
+
+							spMap := map[string]interface{}{
+								"id":          spID,
+								"appId":       appID,
+								"displayName": *sp,
+								"description": description,
+							}
+							results = append(results, spMap)
+						}
+						return results, nil
+					}
+					return nil, errors.Errorf("unsupported query type: %s", in.QueryType)
+				},
+			}
+
+			f := &Function{
+				graphQuery: mockQuery,
+				log:        logging.NewNopLogger(),
+			}
+			rsp, err := f.RunFunction(tc.args.ctx, tc.args.req)
+
+			if diff := cmp.Diff(tc.want.rsp, rsp, protocmp.Transform()); diff != "" {
+				t.Errorf("%s\nf.RunFunction(...): -want rsp, +got rsp:\n%s", tc.reason, diff)
+			}
+
+			if diff := cmp.Diff(tc.want.err, err, cmpopts.EquateErrors()); diff != "" {
+				t.Errorf("%s\nf.RunFunction(...): -want err, +got err:\n%s", tc.reason, diff)
+			}
+		})
+	}
+}
+
 func TestRunFunction(t *testing.T) {
 
 	var (

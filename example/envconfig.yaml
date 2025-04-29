@@ -9,3 +9,5 @@ data:
     - test-fn-msgraph
   users:
     - yury@upbound.io
+  servicePrincipalNames:
+    - yury-upbound-oidc-provider

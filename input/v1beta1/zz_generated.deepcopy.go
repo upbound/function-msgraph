@@ -66,6 +66,11 @@ func (in *Input) DeepCopyInto(out *Input) {
 			}
 		}
 	}
+	if in.ServicePrincipalsRef != nil {
+		in, out := &in.ServicePrincipalsRef, &out.ServicePrincipalsRef
+		*out = new(string)
+		**out = **in
+	}
 	if in.SkipQueryWhenTargetHasData != nil {
 		in, out := &in.SkipQueryWhenTargetHasData, &out.SkipQueryWhenTargetHasData
 		*out = new(bool)

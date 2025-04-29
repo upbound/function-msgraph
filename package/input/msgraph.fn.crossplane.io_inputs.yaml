@@ -66,6 +66,11 @@ spec:
             items:
               type: string
             type: array
+          servicePrincipalsRef:
+            description: |-
+              ServicePrincipalsRef is a reference to retrieve the service principal names (e.g., from status or context)
+              Overrides ServicePrincipals field if used
+            type: string
           skipQueryWhenTargetHasData:
             description: |-
               SkipQueryWhenTargetHasData controls whether to skip the query when the target already has data

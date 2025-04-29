@@ -95,3 +95,13 @@ Get details of specified service principals:
 ```shell
 crossplane render xr.yaml service-principal-example.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc
 ```
+
+Dynamic `servicePrinicpalsRef` variations:
+
+```shell
+crossplane render xr.yaml service-principal-example-status-ref.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc
+```
+
+```shell
+crossplane render xr.yaml service-principal-example-context-ref.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc --extra-resources=envconfig.yaml
+```

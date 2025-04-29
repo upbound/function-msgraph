@@ -54,6 +54,11 @@ type Input struct {
 	// +optional
 	ServicePrincipals []*string `json:"servicePrincipals,omitempty"`
 
+	// ServicePrincipalsRef is a reference to retrieve the service principal names (e.g., from status or context)
+	// Overrides ServicePrincipals field if used
+	// +optional
+	ServicePrincipalsRef *string `json:"servicePrincipalsRef,omitempty"`
+
 	// Target where to store the Query Result
 	Target string `json:"target"`
 
