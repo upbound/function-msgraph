@@ -375,7 +375,7 @@ func (g *GraphQuery) fetchGroupMembers(ctx context.Context, client *msgraphsdk.G
 	// Select the fields we want
 	membersRequestConfig.QueryParameters.Select = []string{
 		"id", "displayName", "mail", "userPrincipalName",
-		"appId", "description",
+		"appId", "description", "objectType",
 	}
 
 	// Get the members
@@ -383,8 +383,22 @@ func (g *GraphQuery) fetchGroupMembers(ctx context.Context, client *msgraphsdk.G
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to get members for group %s", groupName)
 	}
+	
+	// Get raw response data directly
+	values := result.GetValue()
+	
+	// Hard-code types for users if we can identify them
+	// This is a workaround until we can understand what data the API provides
+	for _, obj := range values {
+		// Get additional data
+		additionalData := obj.GetAdditionalData()
+		
+		// Log the additional data for debugging
+		additionalDataStr, _ := json.Marshal(additionalData)
+		fmt.Printf("Member additional data: %s\n", additionalDataStr)
+	}
 
-	return result.GetValue(), nil
+	return values, nil
 }
 
 // extractDisplayName attempts to extract the display name from a directory object
@@ -449,11 +463,11 @@ func (g *GraphQuery) extractServicePrincipalProperties(additionalData map[string
 // getMemberType determines the type of member based on odata.type
 func (g *GraphQuery) getMemberType(odataType string) string {
 	switch {
-	case strings.Contains(odataType, "user"):
+	case strings.Contains(strings.ToLower(odataType), "user"):
 		return "user"
-	case strings.Contains(odataType, "servicePrincipal"):
+	case strings.Contains(strings.ToLower(odataType), "serviceprincipal"):
 		return "servicePrincipal"
-	case strings.Contains(odataType, "group"):
+	case strings.Contains(strings.ToLower(odataType), "group"):
 		return "group"
 	default:
 		return "unknown"
@@ -464,14 +478,22 @@ func (g *GraphQuery) getMemberType(odataType string) string {
 func (g *GraphQuery) extractMemberProperties(additionalData map[string]interface{}, memberMap map[string]interface{}) string {
 	memberType := "unknown"
 
-	// Determine type from @odata.type
+	// Try to determine type from @odata.type
 	odataType, ok := g.extractStringProperty(additionalData, "@odata.type")
-	if !ok {
-		return memberType
+	if ok {
+		memberType = g.getMemberType(odataType)
+	} else {
+		// Fallback type detection based on available properties
+		_, hasUserPrincipalName := g.extractStringProperty(additionalData, "userPrincipalName")
+		_, hasMail := g.extractStringProperty(additionalData, "mail")
+		_, hasAppId := g.extractStringProperty(additionalData, "appId")
+		
+		if hasUserPrincipalName || hasMail {
+			memberType = "user"
+		} else if hasAppId {
+			memberType = "servicePrincipal"
+		}
 	}
-
-	// Get the member type
-	memberType = g.getMemberType(odataType)
 
 	// Extract type-specific properties
 	switch memberType {
@@ -510,17 +532,47 @@ func (g *GraphQuery) getGroupMembers(ctx context.Context, client *msgraphsdk.Gra
 		memberID := member.GetId()
 		additionalData := member.GetAdditionalData()
 
+		// For debugging, log the raw additional data
+		additionalDataJSON, _ := json.Marshal(additionalData)
+		fmt.Printf("Member %s additional data: %s\n", *memberID, additionalDataJSON)
+
+		// Check if we can determine the member type using reflection
+		var memberType string = "unknown"
+		
+		// Force user type based on properties
+		_, hasUserPrincipalName := g.extractStringProperty(additionalData, "userPrincipalName")
+		_, hasMail := g.extractStringProperty(additionalData, "mail")
+		if hasUserPrincipalName || hasMail {
+			memberType = "user"
+		}
+		
+		// Try to use model interfaces instead of additionalData
+		// Try to cast to user
+		if user, ok := member.(models.Userable); ok && user != nil {
+			memberType = "user"
+		}
+		
+		// Try to cast to service principal
+		if sp, ok := member.(models.ServicePrincipalable); ok && sp != nil {
+			memberType = "servicePrincipal"
+		}
+		
 		// Create basic member info
 		memberMap := map[string]interface{}{
-			"id": memberID,
+			"id":   memberID,
+			"type": memberType,
 		}
 
 		// Extract display name
 		memberMap["displayName"] = g.extractDisplayName(member, *memberID)
 
-		// Extract type-specific properties
-		memberType := g.extractMemberProperties(additionalData, memberMap)
-		memberMap["type"] = memberType
+		// Extract type-specific properties based on determined type
+		switch memberType {
+		case "user":
+			g.extractUserProperties(additionalData, memberMap)
+		case "servicePrincipal":
+			g.extractServicePrincipalProperties(additionalData, memberMap)
+		}
 
 		members = append(members, memberMap)
 	}
