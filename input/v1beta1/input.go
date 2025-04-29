@@ -31,6 +31,11 @@ type Input struct {
 	// +optional
 	Groups []*string `json:"groups,omitempty"`
 
+	// GroupsRef is a reference to retrieve the group names (e.g., from status or context)
+	// Overrides Groups field if used
+	// +optional
+	GroupsRef *string `json:"groupsRef,omitempty"`
+
 	// Group is a single group name for group membership queries
 	// +optional
 	Group *string `json:"group,omitempty"`

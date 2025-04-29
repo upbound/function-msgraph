@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -27,6 +28,304 @@ func (m *MockGraphQuery) graphQuery(ctx context.Context, azureCreds map[string]s
 
 func strPtr(s string) *string {
 	return &s
+}
+
+// TestResolveGroupsRef tests the functionality of resolving groupsRef from context or status
+func TestResolveGroupsRef(t *testing.T) {
+	var (
+		xr    = `{"apiVersion":"example.org/v1","kind":"XR","metadata":{"name":"cool-xr"},"spec":{"count":2}}`
+		creds = &fnv1.CredentialData{
+			Data: map[string][]byte{
+				"credentials": []byte(`{
+"clientId": "test-client-id",
+"clientSecret": "test-client-secret",
+"subscriptionId": "test-subscription-id",
+"tenantId": "test-tenant-id"
+}`),
+			},
+		}
+	)
+
+	type args struct {
+		ctx context.Context
+		req *fnv1.RunFunctionRequest
+	}
+	type want struct {
+		rsp *fnv1.RunFunctionResponse
+		err error
+	}
+
+	cases := map[string]struct {
+		reason string
+		args   args
+		want   want
+	}{
+		"GroupsRefFromStatus": {
+			reason: "The Function should resolve groupsRef from XR status",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "GroupObjectIDs",
+						"groupsRef": "status.groups",
+						"target": "status.groupObjectIDs"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"status": {
+									"groups": ["Developers", "Operations", "All Company"]
+								}
+							}`),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "GroupObjectIDs"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"status": {
+									"groups": ["Developers", "Operations", "All Company"],
+									"groupObjectIDs": [
+										{
+											"id": "group-id-1",
+											"displayName": "Developers",
+											"description": "Development team"
+										},
+										{
+											"id": "group-id-2",
+											"displayName": "Operations",
+											"description": "Operations team"
+										},
+										{
+											"id": "group-id-3",
+											"displayName": "All Company",
+											"description": "All company group"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"GroupsRefFromContext": {
+			reason: "The Function should resolve groupsRef from context",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "GroupObjectIDs",
+						"groupsRef": "context.groups",
+						"target": "status.groupObjectIDs"
+					}`),
+					Context: resource.MustStructJSON(`{
+						"groups": ["Developers", "Operations", "All Company"]
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "GroupObjectIDs"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Context: resource.MustStructJSON(`{
+						"groups": ["Developers", "Operations", "All Company"]
+					}`),
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"metadata": {
+									"name": "cool-xr"
+								},
+								"status": {
+									"groupObjectIDs": [
+										{
+											"id": "group-id-1",
+											"displayName": "Developers",
+											"description": "Development team"
+										},
+										{
+											"id": "group-id-2",
+											"displayName": "Operations",
+											"description": "Operations team"
+										},
+										{
+											"id": "group-id-3",
+											"displayName": "All Company",
+											"description": "All company group"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"GroupsRefNotFound": {
+			reason: "The Function should handle an error when groupsRef cannot be resolved",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "GroupObjectIDs",
+						"groupsRef": "context.nonexistent.value",
+						"target": "status.groupObjectIDs"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  "cannot resolve groupsRef: context.nonexistent.value not found",
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"metadata": {
+									"name": "cool-xr"
+								}
+							}`),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			// Create mock responders for each type of query
+			mockQuery := &MockGraphQuery{
+				GraphQueryFunc: func(_ context.Context, _ map[string]string, in *v1beta1.Input) (interface{}, error) {
+					if in.QueryType == "GroupObjectIDs" {
+						if len(in.Groups) == 0 {
+							return nil, errors.New("no group names provided")
+						}
+
+						var results []interface{}
+						for i, group := range in.Groups {
+							if group == nil {
+								continue
+							}
+
+							groupID := fmt.Sprintf("group-id-%d", i+1)
+							var description string
+							switch *group {
+							case "Operations":
+								description = "Operations team"
+							case "All Company":
+								description = "All company group"
+							default:
+								description = "Development team"
+							}
+
+							groupMap := map[string]interface{}{
+								"id":          groupID,
+								"displayName": *group,
+								"description": description,
+							}
+							results = append(results, groupMap)
+						}
+						return results, nil
+					}
+					return nil, errors.Errorf("unsupported query type: %s", in.QueryType)
+				},
+			}
+
+			f := &Function{
+				graphQuery: mockQuery,
+				log:        logging.NewNopLogger(),
+			}
+			rsp, err := f.RunFunction(tc.args.ctx, tc.args.req)
+
+			if diff := cmp.Diff(tc.want.rsp, rsp, protocmp.Transform()); diff != "" {
+				t.Errorf("%s\nf.RunFunction(...): -want rsp, +got rsp:\n%s", tc.reason, diff)
+			}
+
+			if diff := cmp.Diff(tc.want.err, err, cmpopts.EquateErrors()); diff != "" {
+				t.Errorf("%s\nf.RunFunction(...): -want err, +got err:\n%s", tc.reason, diff)
+			}
+		})
+	}
 }
 
 // TestResolveGroupRef tests the functionality of resolving groupRef from context or status

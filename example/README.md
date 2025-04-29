@@ -68,6 +68,16 @@ Get object IDs for specified Azure AD groups:
 crossplane render xr.yaml group-objectids-example.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc
 ```
 
+Dynamic `groupsRef` variations:
+
+```shell
+crossplane render xr.yaml group-objectids-example-status-ref.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc
+```
+
+```shell
+crossplane render xr.yaml group-objectids-example-context-ref.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc --extra-resources=envconfig.yaml
+```
+
 ### 4. Service Principal Details
 
 Get details of specified service principals:

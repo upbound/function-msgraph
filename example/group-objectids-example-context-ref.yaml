@@ -1,7 +1,7 @@
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
-  name: group-membership-example-context-ref
+  name: group-objectids-example-context-ref
 spec:
   compositeTypeRef:
     apiVersion: example.crossplane.io/v1
@@ -19,17 +19,15 @@ spec:
             - type: Reference
               ref:
                 name: example-config
-    - step: get-group-members
+    - step: get-group-objectids
       functionRef:
         name: function-msgraph
       input:
         apiVersion: msgraph.fn.crossplane.io/v1alpha1
         kind: Input
-        queryType: GroupMembership
-        groupRef: context.[apiextensions.crossplane.io/environment].group.name
-        # The function will automatically select standard fields:
-        # - id, displayName, mail, userPrincipalName, appId, description
-        target: "status.groupMembers"
+        queryType: GroupObjectIDs
+        groupsRef: context.[apiextensions.crossplane.io/environment].groups
+        target: "status.groupObjectIDs"
         skipQueryWhenTargetHasData: true
       credentials:
         - name: azure-creds

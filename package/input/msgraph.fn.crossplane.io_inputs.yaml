@@ -41,6 +41,11 @@ spec:
             items:
               type: string
             type: array
+          groupsRef:
+            description: |-
+              GroupsRef is a reference to retrieve the group names (e.g., from status or context)
+              Overrides Groups field if used
+            type: string
           kind:
             description: |-
               Kind is a string value representing the REST resource this object represents.

@@ -35,6 +35,11 @@ func (in *Input) DeepCopyInto(out *Input) {
 			}
 		}
 	}
+	if in.GroupsRef != nil {
+		in, out := &in.GroupsRef, &out.GroupsRef
+		*out = new(string)
+		**out = **in
+	}
 	if in.Group != nil {
 		in, out := &in.Group, &out.Group
 		*out = new(string)

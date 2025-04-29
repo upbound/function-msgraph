@@ -879,6 +879,16 @@ func (f *Function) validateAndPrepareInput(_ context.Context, req *fnv1.RunFunct
 		return false
 	}
 
+	// Process references based on query type
+	if !f.processReferences(req, in, rsp) {
+		return false
+	}
+
+	return true
+}
+
+// processReferences handles resolving references like groupRef and groupsRef
+func (f *Function) processReferences(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) bool {
 	// Process groupRef if it exists for GroupMembership query type
 	if in.QueryType == "GroupMembership" && in.GroupRef != nil && *in.GroupRef != "" {
 		groupName, err := f.resolveGroupRef(req, in.GroupRef)
@@ -888,6 +898,17 @@ func (f *Function) validateAndPrepareInput(_ context.Context, req *fnv1.RunFunct
 		}
 		in.Group = &groupName
 		f.log.Info("Resolved GroupRef to group", "group", groupName, "groupRef", *in.GroupRef)
+	}
+
+	// Process groupsRef if it exists for GroupObjectIDs query type
+	if in.QueryType == "GroupObjectIDs" && in.GroupsRef != nil && *in.GroupsRef != "" {
+		groupNames, err := f.resolveGroupsRef(req, in.GroupsRef)
+		if err != nil {
+			response.Fatal(rsp, err)
+			return false
+		}
+		in.Groups = groupNames
+		f.log.Info("Resolved GroupsRef to groups", "groupCount", len(groupNames), "groupsRef", *in.GroupsRef)
 	}
 
 	return true
@@ -995,4 +1016,78 @@ func (f *Function) resolveFromContext(req *fnv1.RunFunctionRequest, refKey strin
 		return "", errors.Errorf("cannot resolve groupRef: %s not found", refKey)
 	}
 	return value, nil
+}
+
+// resolveGroupsRef resolves a list of group names from a reference in status or context.
+func (f *Function) resolveGroupsRef(req *fnv1.RunFunctionRequest, groupsRef *string) ([]*string, error) {
+	if groupsRef == nil || *groupsRef == "" {
+		return nil, errors.New("empty groupsRef provided")
+	}
+
+	refKey := *groupsRef
+
+	// Use proper switch statement instead of if-else chain
+	switch {
+	case strings.HasPrefix(refKey, "status."):
+		return f.resolveGroupsFromStatus(req, refKey)
+	case strings.HasPrefix(refKey, "context."):
+		return f.resolveGroupsFromContext(req, refKey)
+	default:
+		return nil, errors.Errorf("unsupported groupsRef format: %s", refKey)
+	}
+}
+
+// resolveGroupsFromStatus resolves a list of group names from XR status
+func (f *Function) resolveGroupsFromStatus(req *fnv1.RunFunctionRequest, refKey string) ([]*string, error) {
+	xrStatus, _, err := f.getXRAndStatus(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot get XR status")
+	}
+
+	statusField := strings.TrimPrefix(refKey, "status.")
+	return f.extractStringArrayFromMap(xrStatus, statusField, refKey)
+}
+
+// resolveGroupsFromContext resolves a list of group names from function context
+func (f *Function) resolveGroupsFromContext(req *fnv1.RunFunctionRequest, refKey string) ([]*string, error) {
+	contextMap := req.GetContext().AsMap()
+	contextField := strings.TrimPrefix(refKey, "context.")
+	return f.extractStringArrayFromMap(contextMap, contextField, refKey)
+}
+
+// extractStringArrayFromMap extracts a string array from a map using nested key
+func (f *Function) extractStringArrayFromMap(dataMap map[string]interface{}, field, refKey string) ([]*string, error) {
+	parts, err := ParseNestedKey(field)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid field key")
+	}
+
+	currentValue := interface{}(dataMap)
+	for _, k := range parts {
+		if nestedMap, ok := currentValue.(map[string]interface{}); ok {
+			if nextValue, exists := nestedMap[k]; exists {
+				currentValue = nextValue
+			} else {
+				return nil, errors.Errorf("cannot resolve groupsRef: %s not found", refKey)
+			}
+		} else {
+			return nil, errors.Errorf("cannot resolve groupsRef: %s not a map", refKey)
+		}
+	}
+
+	// The current value should be a slice of strings
+	if strArray, ok := currentValue.([]interface{}); ok {
+		result := make([]*string, 0, len(strArray))
+		for _, val := range strArray {
+			if strVal, ok := val.(string); ok {
+				strCopy := strVal // Create a new string to avoid pointing to a loop variable
+				result = append(result, &strCopy)
+			}
+		}
+		if len(result) > 0 {
+			return result, nil
+		}
+	}
+
+	return nil, errors.Errorf("cannot resolve groupsRef: %s not a string array or empty", refKey)
 }

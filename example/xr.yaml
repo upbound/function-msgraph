@@ -7,3 +7,5 @@ spec: {}
 status:
   group:
     name: test-fn-msgraph
+  groups:
+    - test-fn-msgraph
