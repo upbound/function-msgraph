@@ -1,0 +1,27 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: service-principal-example-spec-ref
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1
+    kind: XR
+  mode: Pipeline
+  pipeline:
+    - step: get-service-principal-details
+      functionRef:
+        name: function-msgraph
+      input:
+        apiVersion: msgraph.fn.crossplane.io/v1alpha1
+        kind: Input
+        queryType: ServicePrincipalDetails
+        # Using spec reference to get service principal names
+        servicePrincipalsRef: "spec.servicePrincipalConfig.names"
+        target: "status.servicePrincipalDetails"
+        skipQueryWhenTargetHasData: true
+      credentials:
+        - name: azure-creds
+          source: Secret
+          secretRef:
+            namespace: upbound-system
+            name: azure-account-creds

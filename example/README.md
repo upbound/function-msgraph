@@ -52,6 +52,10 @@ crossplane render xr.yaml user-validation-example-status-ref.yaml functions.yaml
 crossplane render xr.yaml user-validation-example-context-ref.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc --extra-resources=envconfig.yaml
 ```
 
+```shell
+crossplane render xr.yaml user-validation-example-spec-ref.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc
+```
+
 ### 2. Group Membership
 
 Get all members of a specified Azure AD group:
@@ -68,6 +72,10 @@ crossplane render xr.yaml group-membership-example-status-ref.yaml functions.yam
 
 ```shell
 crossplane render xr.yaml group-membership-example-context-ref.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc --extra-resources=envconfig.yaml
+```
+
+```shell
+crossplane render xr.yaml group-membership-example-spec-ref.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc
 ```
 
 ### 3. Group Object IDs
@@ -88,6 +96,10 @@ crossplane render xr.yaml group-objectids-example-status-ref.yaml functions.yaml
 crossplane render xr.yaml group-objectids-example-context-ref.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc --extra-resources=envconfig.yaml
 ```
 
+```shell
+crossplane render xr.yaml group-objectids-example-spec-ref.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc
+```
+
 ### 4. Service Principal Details
 
 Get details of specified service principals:
@@ -104,4 +116,8 @@ crossplane render xr.yaml service-principal-example-status-ref.yaml functions.ya
 
 ```shell
 crossplane render xr.yaml service-principal-example-context-ref.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc --extra-resources=envconfig.yaml
+```
+
+```shell
+crossplane render xr.yaml service-principal-example-spec-ref.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc
 ```

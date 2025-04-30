@@ -104,7 +104,23 @@ func (f *Function) parseInputAndCredentials(req *fnv1.RunFunctionRequest, rsp *f
 
 // getXRAndStatus retrieves status and desired XR, handling initialization if needed
 func (f *Function) getXRAndStatus(req *fnv1.RunFunctionRequest) (map[string]interface{}, *resource.Composite, error) {
-	// Get both observed and desired XR
+	// Get composite resources
+	oxr, dxr, err := f.getObservedAndDesired(req)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Initialize and copy data
+	f.initializeAndCopyData(oxr, dxr)
+
+	// Get status
+	xrStatus := f.getStatusFromResources(oxr, dxr)
+
+	return xrStatus, dxr, nil
+}
+
+// getObservedAndDesired gets both observed and desired XR resources
+func (f *Function) getObservedAndDesired(req *fnv1.RunFunctionRequest) (*resource.Composite, *resource.Composite, error) {
 	oxr, err := request.GetObservedCompositeResource(req)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "cannot get observed composite resource")
@@ -115,8 +131,11 @@ func (f *Function) getXRAndStatus(req *fnv1.RunFunctionRequest) (map[string]inte
 		return nil, nil, errors.Wrap(err, "cannot get desired composite resource")
 	}
 
-	xrStatus := make(map[string]interface{})
+	return oxr, dxr, nil
+}
 
+// initializeAndCopyData initializes metadata and copies spec
+func (f *Function) initializeAndCopyData(oxr, dxr *resource.Composite) {
 	// Initialize dxr from oxr if needed
 	if dxr.Resource.GetKind() == "" {
 		dxr.Resource.SetAPIVersion(oxr.Resource.GetAPIVersion())
@@ -124,22 +143,35 @@ func (f *Function) getXRAndStatus(req *fnv1.RunFunctionRequest) (map[string]inte
 		dxr.Resource.SetName(oxr.Resource.GetName())
 	}
 
+	// Copy spec from observed to desired XR to preserve it
+	xrSpec := make(map[string]interface{})
+	if err := oxr.Resource.GetValueInto("spec", &xrSpec); err == nil && len(xrSpec) > 0 {
+		if err := dxr.Resource.SetValue("spec", xrSpec); err != nil {
+			f.log.Debug("Cannot set spec in desired XR", "error", err)
+		}
+	}
+}
+
+// getStatusFromResources gets status from desired or observed XR
+func (f *Function) getStatusFromResources(oxr, dxr *resource.Composite) map[string]interface{} {
+	xrStatus := make(map[string]interface{})
+
 	// First try to get status from desired XR (pipeline changes)
 	if dxr.Resource.GetKind() != "" {
-		err = dxr.Resource.GetValueInto("status", &xrStatus)
+		err := dxr.Resource.GetValueInto("status", &xrStatus)
 		if err == nil && len(xrStatus) > 0 {
-			return xrStatus, dxr, nil
+			return xrStatus
 		}
 		f.log.Debug("Cannot get status from Desired XR or it's empty")
 	}
 
 	// Fallback to observed XR status
-	err = oxr.Resource.GetValueInto("status", &xrStatus)
+	err := oxr.Resource.GetValueInto("status", &xrStatus)
 	if err != nil {
 		f.log.Debug("Cannot get status from Observed XR")
 	}
 
-	return xrStatus, dxr, nil
+	return xrStatus
 }
 
 // checkStatusTargetHasData checks if the status target has data.
@@ -1026,7 +1058,7 @@ func (f *Function) checkContextTargetHasData(req *fnv1.RunFunctionRequest, in *v
 	return false
 }
 
-// resolveGroupRef resolves the group name from a reference in status or context.
+// resolveGroupRef resolves the group name from a reference in spec, status or context.
 func (f *Function) resolveGroupRef(req *fnv1.RunFunctionRequest, groupRef *string) (string, error) {
 	if groupRef == nil || *groupRef == "" {
 		return "", errors.New("empty groupRef provided")
@@ -1040,6 +1072,8 @@ func (f *Function) resolveGroupRef(req *fnv1.RunFunctionRequest, groupRef *strin
 		return f.resolveFromStatus(req, refKey)
 	case strings.HasPrefix(refKey, "context."):
 		return f.resolveFromContext(req, refKey)
+	case strings.HasPrefix(refKey, "spec."):
+		return f.resolveFromSpec(req, refKey)
 	default:
 		return "", errors.Errorf("unsupported groupRef format: %s", refKey)
 	}
@@ -1071,7 +1105,30 @@ func (f *Function) resolveFromContext(req *fnv1.RunFunctionRequest, refKey strin
 	return value, nil
 }
 
-// resolveStringArrayRef resolves a list of string values from a reference in status or context
+// resolveFromSpec resolves a reference from XR spec
+func (f *Function) resolveFromSpec(req *fnv1.RunFunctionRequest, refKey string) (string, error) {
+	// Use getXRAndStatus to ensure spec is copied to desired XR
+	_, dxr, err := f.getXRAndStatus(req)
+	if err != nil {
+		return "", errors.Wrap(err, "cannot get XR status and desired XR")
+	}
+
+	// Get spec from the desired XR (which now has the spec copied from observed)
+	xrSpec := make(map[string]interface{})
+	err = dxr.Resource.GetValueInto("spec", &xrSpec)
+	if err != nil {
+		return "", errors.Wrap(err, "cannot get XR spec")
+	}
+
+	specField := strings.TrimPrefix(refKey, "spec.")
+	value, ok := GetNestedKey(xrSpec, specField)
+	if !ok {
+		return "", errors.Errorf("cannot resolve groupRef: %s not found", refKey)
+	}
+	return value, nil
+}
+
+// resolveStringArrayRef resolves a list of string values from a reference in spec, status or context
 func (f *Function) resolveStringArrayRef(req *fnv1.RunFunctionRequest, ref *string, refType string) ([]*string, error) {
 	if ref == nil || *ref == "" {
 		return nil, errors.Errorf("empty %s provided", refType)
@@ -1090,6 +1147,8 @@ func (f *Function) resolveStringArrayRef(req *fnv1.RunFunctionRequest, ref *stri
 		result, err = f.resolveStringArrayFromStatus(req, refKey)
 	case strings.HasPrefix(refKey, "context."):
 		result, err = f.resolveStringArrayFromContext(req, refKey)
+	case strings.HasPrefix(refKey, "spec."):
+		result, err = f.resolveStringArrayFromSpec(req, refKey)
 	default:
 		return nil, errors.Errorf("unsupported %s format: %s", refType, refKey)
 	}
@@ -1120,6 +1179,25 @@ func (f *Function) resolveStringArrayFromContext(req *fnv1.RunFunctionRequest, r
 	contextMap := req.GetContext().AsMap()
 	contextField := strings.TrimPrefix(refKey, "context.")
 	return f.extractStringArrayFromMap(contextMap, contextField, refKey)
+}
+
+// resolveStringArrayFromSpec resolves a list of string values from XR spec
+func (f *Function) resolveStringArrayFromSpec(req *fnv1.RunFunctionRequest, refKey string) ([]*string, error) {
+	// Use getXRAndStatus to ensure spec is copied to desired XR
+	_, dxr, err := f.getXRAndStatus(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot get XR status and desired XR")
+	}
+
+	// Get spec from the desired XR (which now has the spec copied from observed)
+	xrSpec := make(map[string]interface{})
+	err = dxr.Resource.GetValueInto("spec", &xrSpec)
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot get XR spec")
+	}
+
+	specField := strings.TrimPrefix(refKey, "spec.")
+	return f.extractStringArrayFromMap(xrSpec, specField, refKey)
 }
 
 // resolveGroupsRef resolves a list of group names from a reference in status or context
