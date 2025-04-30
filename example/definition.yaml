@@ -23,6 +23,36 @@ spec:
               queryResourceType:
                 description: resource type for az resource query construction
                 type: string
+              groupConfig:
+                description: Configuration for group references
+                type: object
+                properties:
+                  name:
+                    description: Name of a single group to reference with groupRef
+                    type: string
+                  names:
+                    description: List of group names to reference with groupsRef
+                    type: array
+                    items:
+                      type: string
+              userAccess:
+                description: Configuration for user references
+                type: object
+                properties:
+                  emails:
+                    description: List of user emails to reference with usersRef
+                    type: array
+                    items:
+                      type: string
+              servicePrincipalConfig:
+                description: Configuration for service principal references
+                type: object
+                properties:
+                  names:
+                    description: List of service principal names to reference with servicePrincipalsRef
+                    type: array
+                    items:
+                      type: string
           status:
             description: XRStatus defines the observed state of XR.
             type: object
