@@ -189,9 +189,13 @@ spec:
 |-------|------|-------------|
 | `queryType` | string | Required. Type of query to perform. Valid values: `UserValidation`, `GroupMembership`, `GroupObjectIDs`, `ServicePrincipalDetails` |
 | `users` | []string | List of user principal names (email IDs) for user validation |
+| `usersRef` | string | Reference to resolve a list of user names from `spec`, `status` or `context` (e.g., `spec.userAccess.emails`) |
 | `group` | string | Single group name for group membership queries |
+| `groupRef` | string | Reference to resolve a single group name from `spec`, `status` or `context` (e.g., `spec.groupConfig.name`) |
 | `groups` | []string | List of group names for group object ID queries |
+| `groupsRef` | string | Reference to resolve a list of group names from `spec`, `status` or `context` (e.g., `spec.groupConfig.names`) |
 | `servicePrincipals` | []string | List of service principal names |
+| `servicePrincipalsRef` | string | Reference to resolve a list of service principal names from `spec`, `status` or `context` (e.g., `spec.servicePrincipalConfig.names`) |
 | `target` | string | Required. Where to store the query results. Can be `status.<field>` or `context.<field>` |
 | `skipQueryWhenTargetHasData` | bool | Optional. When true, will skip the query if the target already has data |
 
@@ -211,6 +215,50 @@ target: "context.results"
 
 # Store in Environment
 target: "context.[apiextensions.crossplane.io/environment].results"
+```
+
+## Using Reference Fields
+
+You can reference values from XR spec, status, or context instead of hardcoding them:
+
+### Using groupRef from spec
+
+```yaml
+apiVersion: msgraph.fn.crossplane.io/v1alpha1
+kind: Input
+queryType: GroupMembership
+groupRef: "spec.groupConfig.name"  # Get group name from XR spec
+target: "status.groupMembers"
+```
+
+### Using groupsRef from spec
+
+```yaml
+apiVersion: msgraph.fn.crossplane.io/v1alpha1
+kind: Input
+queryType: GroupObjectIDs
+groupsRef: "spec.groupConfig.names"  # Get group names from XR spec
+target: "status.groupObjectIDs"
+```
+
+### Using usersRef from spec
+
+```yaml
+apiVersion: msgraph.fn.crossplane.io/v1alpha1
+kind: Input
+queryType: UserValidation
+usersRef: "spec.userAccess.emails"  # Get user emails from XR spec
+target: "status.validatedUsers"
+```
+
+### Using servicePrincipalsRef from spec
+
+```yaml
+apiVersion: msgraph.fn.crossplane.io/v1alpha1
+kind: Input
+queryType: ServicePrincipalDetails
+servicePrincipalsRef: "spec.servicePrincipalConfig.names"  # Get service principal names from XR spec
+target: "status.servicePrincipals"
 ```
 
 ## References
