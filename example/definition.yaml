@@ -27,15 +27,30 @@ spec:
             description: XRStatus defines the observed state of XR.
             type: object
             properties:
-              azResourceGraphQueryResult:
-                description: Freeform field containing query results from function-azresourcegraph
+              groupMembers:
+                description: Freeform field containing query results from function-msgraph
                 type: array
                 items:
                   type: object
                 x-kubernetes-preserve-unknown-fields: true
-              azResourceGraphQuery:
-                description: Freeform field containing query results from function-azresourcegraph
-                type: string
+              validatedUsers:
+                description: Freeform field containing query results from function-msgraph
+                type: array
+                items:
+                  type: object
+                x-kubernetes-preserve-unknown-fields: true
+              groupObjectIDs:
+                description: Freeform field containing query results from function-msgraph
+                type: array
+                items:
+                  type: object
+                x-kubernetes-preserve-unknown-fields: true
+              servicePrincipals:
+                description: Freeform field containing query results from function-msgraph
+                type: array
+                items:
+                  type: object
+                x-kubernetes-preserve-unknown-fields: true
         required:
         - spec
         type: object
