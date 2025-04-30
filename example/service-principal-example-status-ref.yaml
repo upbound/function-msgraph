@@ -1,30 +1,26 @@
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
-  name: group-membership-example
+  name: service-principal-example-status-ref
   annotations:
     # Important: This function requires an Azure AD app registration with Microsoft Graph API permissions:
-    # - Group.Read.All
+    # - Application.Read.All
     # - Directory.Read.All
-    # - User.Read.All (if groups contain users)
-    # - Application.Read.All (if groups contain service principals)
 spec:
   compositeTypeRef:
     apiVersion: example.crossplane.io/v1
     kind: XR
   mode: Pipeline
   pipeline:
-    - step: get-group-members
+    - step: get-service-principal-details
       functionRef:
         name: function-msgraph
       input:
         apiVersion: msgraph.fn.crossplane.io/v1alpha1
         kind: Input
-        queryType: GroupMembership
-        group: test-fn-msgraph
-        # The function will automatically select standard fields:
-        # - id, displayName, mail, userPrincipalName, appId, description
-        target: "status.groupMembers"
+        queryType: ServicePrincipalDetails
+        servicePrincipalsRef: status.servicePrincipalNames
+        target: "status.servicePrincipals"
         skipQueryWhenTargetHasData: true
       credentials:
         - name: azure-creds

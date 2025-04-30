@@ -1,7 +1,7 @@
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
-  name: group-membership-example
+  name: group-membership-example-spec-ref
   annotations:
     # Important: This function requires an Azure AD app registration with Microsoft Graph API permissions:
     # - Group.Read.All
@@ -21,7 +21,8 @@ spec:
         apiVersion: msgraph.fn.crossplane.io/v1alpha1
         kind: Input
         queryType: GroupMembership
-        group: test-fn-msgraph
+        # Using spec reference to get group name
+        groupRef: "spec.groupConfig.name"
         # The function will automatically select standard fields:
         # - id, displayName, mail, userPrincipalName, appId, description
         target: "status.groupMembers"

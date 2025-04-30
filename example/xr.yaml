@@ -1,6 +1,41 @@
-# Replace this with your XR!
+# Example XR with both spec references and status fields
 apiVersion: example.crossplane.io/v1
 kind: XR
 metadata:
   name: example-xr
-spec: {}
+spec:
+  # Group config for group references
+  groupConfig:
+    # For single group reference (groupRef)
+    name: test-fn-msgraph
+    # For multiple group references (groupsRef)
+    names:
+      - "Developers"
+      - "All Engineering"
+      - "All Company"
+      - "test-fn-msgraph"
+  # User access config for user references
+  userAccess:
+    # For user validation (usersRef)
+    emails:
+      - "admin@example.onmicrosoft.com"
+      - "user@example.onmicrosoft.com"
+      - "yury@upbound.io"
+  # Service principal config for service principal references
+  servicePrincipalConfig:
+    # For service principal details (servicePrincipalsRef)
+    names:
+      - "MyServiceApp"
+      - "ApiConnector"
+      - "yury-upbound-oidc-provider"
+
+status:
+  # For testing status.field references
+  group:
+    name: test-fn-msgraph
+  groups:
+    - test-fn-msgraph
+  users:
+    - yury@upbound.io
+  servicePrincipalNames:
+    - yury-upbound-oidc-provider

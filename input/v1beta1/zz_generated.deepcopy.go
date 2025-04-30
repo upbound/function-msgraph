@@ -24,6 +24,11 @@ func (in *Input) DeepCopyInto(out *Input) {
 			}
 		}
 	}
+	if in.UsersRef != nil {
+		in, out := &in.UsersRef, &out.UsersRef
+		*out = new(string)
+		**out = **in
+	}
 	if in.Groups != nil {
 		in, out := &in.Groups, &out.Groups
 		*out = make([]*string, len(*in))
@@ -35,8 +40,18 @@ func (in *Input) DeepCopyInto(out *Input) {
 			}
 		}
 	}
+	if in.GroupsRef != nil {
+		in, out := &in.GroupsRef, &out.GroupsRef
+		*out = new(string)
+		**out = **in
+	}
 	if in.Group != nil {
 		in, out := &in.Group, &out.Group
+		*out = new(string)
+		**out = **in
+	}
+	if in.GroupRef != nil {
+		in, out := &in.GroupRef, &out.GroupRef
 		*out = new(string)
 		**out = **in
 	}
@@ -50,6 +65,11 @@ func (in *Input) DeepCopyInto(out *Input) {
 				**out = **in
 			}
 		}
+	}
+	if in.ServicePrincipalsRef != nil {
+		in, out := &in.ServicePrincipalsRef, &out.ServicePrincipalsRef
+		*out = new(string)
+		**out = **in
 	}
 	if in.SkipQueryWhenTargetHasData != nil {
 		in, out := &in.SkipQueryWhenTargetHasData, &out.SkipQueryWhenTargetHasData

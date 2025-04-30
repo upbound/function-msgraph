@@ -1,17 +1,24 @@
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
-  name: group-objectids-example
-  annotations:
-    # Important: This function requires an Azure AD app registration with Microsoft Graph API permissions:
-    # - Group.Read.All
-    # - Directory.Read.All
+  name: group-objectids-example-context-ref
 spec:
   compositeTypeRef:
     apiVersion: example.crossplane.io/v1
     kind: XR
   mode: Pipeline
   pipeline:
+    - step: environmentConfigs
+      functionRef:
+        name: crossplane-contrib-function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - type: Reference
+              ref:
+                name: example-config
     - step: get-group-objectids
       functionRef:
         name: function-msgraph
@@ -19,11 +26,7 @@ spec:
         apiVersion: msgraph.fn.crossplane.io/v1alpha1
         kind: Input
         queryType: GroupObjectIDs
-        groups:
-          - "Developers"
-          - "All Engineering"
-          - "All Company"
-          - test-fn-msgraph
+        groupsRef: context.[apiextensions.crossplane.io/environment].groups
         target: "status.groupObjectIDs"
         skipQueryWhenTargetHasData: true
       credentials:

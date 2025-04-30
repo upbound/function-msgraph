@@ -46,42 +46,25 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 
 	rsp := response.To(req, response.DefaultTTL)
 
-	// Ensure oxr to dxr gets propagated and we keep status around
-	if err := f.propagateDesiredXR(req, rsp); err != nil {
-		return rsp, nil //nolint:nilerr // errors are handled in rsp. We should not error main function and proceed with reconciliation
+	// Initialize response with desired XR and preserve context
+	if err := f.initializeResponse(req, rsp); err != nil {
+		return rsp, nil //nolint:nilerr // errors are handled in rsp
 	}
-	// Ensure the context is preserved
-	f.preserveContext(req, rsp)
 
 	// Parse input and get credentials
 	in, azureCreds, err := f.parseInputAndCredentials(req, rsp)
 	if err != nil {
-		return rsp, nil //nolint:nilerr // errors are handled in rsp. We should not error main function and proceed with reconciliation
+		return rsp, nil //nolint:nilerr // errors are handled in rsp
 	}
 
-	// Check if target is valid
-	if !f.isValidTarget(in.Target) {
-		response.Fatal(rsp, errors.Errorf("Unrecognized target field: %s", in.Target))
-		return rsp, nil
+	// Validate and prepare input
+	if !f.validateAndPrepareInput(ctx, req, in, rsp) {
+		return rsp, nil // Early return if validation failed or query should be skipped
 	}
 
-	// Check if we should skip the query
-	if f.shouldSkipQuery(req, in, rsp) {
-		// Set success condition
-		response.ConditionTrue(rsp, "FunctionSuccess", "Success").
-			TargetCompositeAndClaim()
-		return rsp, nil
-	}
-
-	// Execute the query
-	results, err := f.executeQuery(ctx, azureCreds, in, rsp)
-	if err != nil {
-		return rsp, nil //nolint:nilerr // errors are handled in rsp. We should not error main function and proceed with reconciliation
-	}
-
-	// Process the results
-	if err := f.processResults(req, in, results, rsp); err != nil {
-		return rsp, nil //nolint:nilerr // errors are handled in rsp. We should not error main function and proceed with reconciliation
+	// Execute the query and process results
+	if !f.executeAndProcessQuery(ctx, req, in, azureCreds, rsp) {
+		return rsp, nil // Error already handled in response
 	}
 
 	// Set success condition
@@ -121,7 +104,23 @@ func (f *Function) parseInputAndCredentials(req *fnv1.RunFunctionRequest, rsp *f
 
 // getXRAndStatus retrieves status and desired XR, handling initialization if needed
 func (f *Function) getXRAndStatus(req *fnv1.RunFunctionRequest) (map[string]interface{}, *resource.Composite, error) {
-	// Get both observed and desired XR
+	// Get composite resources
+	oxr, dxr, err := f.getObservedAndDesired(req)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Initialize and copy data
+	f.initializeAndCopyData(oxr, dxr)
+
+	// Get status
+	xrStatus := f.getStatusFromResources(oxr, dxr)
+
+	return xrStatus, dxr, nil
+}
+
+// getObservedAndDesired gets both observed and desired XR resources
+func (f *Function) getObservedAndDesired(req *fnv1.RunFunctionRequest) (*resource.Composite, *resource.Composite, error) {
 	oxr, err := request.GetObservedCompositeResource(req)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "cannot get observed composite resource")
@@ -132,8 +131,11 @@ func (f *Function) getXRAndStatus(req *fnv1.RunFunctionRequest) (map[string]inte
 		return nil, nil, errors.Wrap(err, "cannot get desired composite resource")
 	}
 
-	xrStatus := make(map[string]interface{})
+	return oxr, dxr, nil
+}
 
+// initializeAndCopyData initializes metadata and copies spec
+func (f *Function) initializeAndCopyData(oxr, dxr *resource.Composite) {
 	// Initialize dxr from oxr if needed
 	if dxr.Resource.GetKind() == "" {
 		dxr.Resource.SetAPIVersion(oxr.Resource.GetAPIVersion())
@@ -141,22 +143,35 @@ func (f *Function) getXRAndStatus(req *fnv1.RunFunctionRequest) (map[string]inte
 		dxr.Resource.SetName(oxr.Resource.GetName())
 	}
 
+	// Copy spec from observed to desired XR to preserve it
+	xrSpec := make(map[string]interface{})
+	if err := oxr.Resource.GetValueInto("spec", &xrSpec); err == nil && len(xrSpec) > 0 {
+		if err := dxr.Resource.SetValue("spec", xrSpec); err != nil {
+			f.log.Debug("Cannot set spec in desired XR", "error", err)
+		}
+	}
+}
+
+// getStatusFromResources gets status from desired or observed XR
+func (f *Function) getStatusFromResources(oxr, dxr *resource.Composite) map[string]interface{} {
+	xrStatus := make(map[string]interface{})
+
 	// First try to get status from desired XR (pipeline changes)
 	if dxr.Resource.GetKind() != "" {
-		err = dxr.Resource.GetValueInto("status", &xrStatus)
+		err := dxr.Resource.GetValueInto("status", &xrStatus)
 		if err == nil && len(xrStatus) > 0 {
-			return xrStatus, dxr, nil
+			return xrStatus
 		}
 		f.log.Debug("Cannot get status from Desired XR or it's empty")
 	}
 
 	// Fallback to observed XR status
-	err = oxr.Resource.GetValueInto("status", &xrStatus)
+	err := oxr.Resource.GetValueInto("status", &xrStatus)
 	if err != nil {
 		f.log.Debug("Cannot get status from Observed XR")
 	}
 
-	return xrStatus, dxr, nil
+	return xrStatus
 }
 
 // checkStatusTargetHasData checks if the status target has data.
@@ -180,6 +195,11 @@ func (f *Function) checkStatusTargetHasData(req *fnv1.RunFunctionRequest, in *v1
 
 // executeQuery executes the query.
 func (f *Function) executeQuery(ctx context.Context, azureCreds map[string]string, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) (interface{}, error) {
+	// Initialize GraphQuery with logger if needed
+	if gq, ok := f.graphQuery.(*GraphQuery); ok {
+		gq.log = f.log
+	}
+
 	results, err := f.graphQuery.graphQuery(ctx, azureCreds, in)
 	if err != nil {
 		response.Fatal(rsp, err)
@@ -239,7 +259,9 @@ func getCreds(req *fnv1.RunFunctionRequest) (map[string]string, error) {
 
 // GraphQuery is a concrete implementation of the GraphQueryInterface
 // that interacts with Microsoft Graph API.
-type GraphQuery struct{}
+type GraphQuery struct {
+	log logging.Logger
+}
 
 // createGraphClient initializes a Microsoft Graph client using the provided credentials
 func (g *GraphQuery) createGraphClient(azureCreds map[string]string) (*msgraphsdk.GraphServiceClient, error) {
@@ -367,24 +389,35 @@ func (g *GraphQuery) findGroupByName(ctx context.Context, client *msgraphsdk.Gra
 
 // fetchGroupMembers fetches all members of a group by group ID
 func (g *GraphQuery) fetchGroupMembers(ctx context.Context, client *msgraphsdk.GraphServiceClient, groupID string, groupName string) ([]models.DirectoryObjectable, error) {
-	// Configure the members request
-	membersRequestConfig := &groups.ItemMembersRequestBuilderGetRequestConfiguration{
-		QueryParameters: &groups.ItemMembersRequestBuilderGetQueryParameters{},
+	// Create a request configuration that expands members
+	// This is the workaround for the known issue where service principals
+	// are not listed as group members in v1.0
+	// See: https://developer.microsoft.com/en-us/graph/known-issues/?search=25984
+	requestConfig := &groups.GroupItemRequestBuilderGetRequestConfiguration{
+		QueryParameters: &groups.GroupItemRequestBuilderGetQueryParameters{
+			Expand: []string{"members"},
+		},
 	}
 
-	// Select the fields we want
-	membersRequestConfig.QueryParameters.Select = []string{
-		"id", "displayName", "mail", "userPrincipalName",
-		"appId", "description",
-	}
-
-	// Get the members
-	result, err := client.Groups().ByGroupId(groupID).Members().Get(ctx, membersRequestConfig)
+	// Get the group with expanded members using the workaround
+	// mentioned in the Microsoft documentation
+	group, err := client.Groups().ByGroupId(groupID).Get(ctx, requestConfig)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to get members for group %s", groupName)
 	}
 
-	return result.GetValue(), nil
+	// Extract the members from the expanded result
+	var members []models.DirectoryObjectable
+	if group.GetMembers() != nil {
+		members = group.GetMembers()
+	}
+
+	// Log basic information about the membership
+	if g.log != nil {
+		g.log.Debug("Retrieved group members", "groupName", groupName, "groupID", groupID, "memberCount", len(members))
+	}
+
+	return members, nil
 }
 
 // extractDisplayName attempts to extract the display name from a directory object
@@ -446,82 +479,92 @@ func (g *GraphQuery) extractServicePrincipalProperties(additionalData map[string
 	}
 }
 
-// getMemberType determines the type of member based on odata.type
-func (g *GraphQuery) getMemberType(odataType string) string {
-	switch {
-	case strings.Contains(odataType, "user"):
-		return "user"
-	case strings.Contains(odataType, "servicePrincipal"):
-		return "servicePrincipal"
-	case strings.Contains(odataType, "group"):
-		return "group"
-	default:
-		return "unknown"
-	}
-}
+// processMember extracts member information into a map
+func (g *GraphQuery) processMember(member models.DirectoryObjectable) map[string]interface{} {
+	// Define constants for member types
+	const (
+		userType             = "user"
+		servicePrincipalType = "servicePrincipal"
+		unknownType          = "unknown"
+	)
 
-// extractMemberProperties extracts relevant properties based on the member type
-func (g *GraphQuery) extractMemberProperties(additionalData map[string]interface{}, memberMap map[string]interface{}) string {
-	memberType := "unknown"
+	memberID := member.GetId()
+	additionalData := member.GetAdditionalData()
 
-	// Determine type from @odata.type
-	odataType, ok := g.extractStringProperty(additionalData, "@odata.type")
-	if !ok {
-		return memberType
+	// Create basic member info
+	memberMap := map[string]interface{}{
+		"id": memberID,
 	}
 
-	// Get the member type
-	memberType = g.getMemberType(odataType)
+	// Determine member type
+	memberType := unknownType
+
+	// Check properties that indicate user type
+	_, hasUserPrincipalName := g.extractStringProperty(additionalData, "userPrincipalName")
+	_, hasMail := g.extractStringProperty(additionalData, "mail")
+	if hasUserPrincipalName || hasMail {
+		memberType = userType
+	}
+
+	// Check properties that indicate service principal type
+	_, hasAppID := g.extractStringProperty(additionalData, "appId")
+	if hasAppID {
+		memberType = servicePrincipalType
+	}
+
+	// Try interface type checking for more accuracy
+	if _, ok := member.(models.Userable); ok {
+		memberType = userType
+	}
+	if _, ok := member.(models.ServicePrincipalable); ok {
+		memberType = servicePrincipalType
+	}
+
+	// Add type to member info
+	memberMap["type"] = memberType
+
+	// Extract display name
+	memberMap["displayName"] = g.extractDisplayName(member, *memberID)
 
 	// Extract type-specific properties
 	switch memberType {
-	case "user":
+	case userType:
 		g.extractUserProperties(additionalData, memberMap)
-	case "servicePrincipal":
+	case servicePrincipalType:
 		g.extractServicePrincipalProperties(additionalData, memberMap)
 	}
 
-	return memberType
+	return memberMap
 }
 
 // getGroupMembers retrieves all members of the specified group
 func (g *GraphQuery) getGroupMembers(ctx context.Context, client *msgraphsdk.GraphServiceClient, in *v1beta1.Input) (interface{}, error) {
-	// Validate input
-	if in.Group == nil || *in.Group == "" {
+	// Determine the group name to use
+	var groupName string
+
+	// Check if we have a group name (either directly or resolved from GroupRef)
+	if in.Group != nil && *in.Group != "" {
+		groupName = *in.Group
+	} else {
 		return nil, errors.New("no group name provided")
 	}
 
 	// Find the group
-	groupID, err := g.findGroupByName(ctx, client, *in.Group)
+	groupID, err := g.findGroupByName(ctx, client, groupName)
 	if err != nil {
 		return nil, err
 	}
 
 	// Fetch the members
-	memberObjects, err := g.fetchGroupMembers(ctx, client, *groupID, *in.Group)
+	memberObjects, err := g.fetchGroupMembers(ctx, client, *groupID, groupName)
 	if err != nil {
 		return nil, err
 	}
 
 	// Process the members
 	members := make([]interface{}, 0, len(memberObjects))
-
 	for _, member := range memberObjects {
-		memberID := member.GetId()
-		additionalData := member.GetAdditionalData()
-
-		// Create basic member info
-		memberMap := map[string]interface{}{
-			"id": memberID,
-		}
-
-		// Extract display name
-		memberMap["displayName"] = g.extractDisplayName(member, *memberID)
-
-		// Extract type-specific properties
-		memberType := g.extractMemberProperties(additionalData, memberMap)
-		memberMap["type"] = memberType
-
+		memberMap := g.processMember(member)
 		members = append(members, memberMap)
 	}
 
@@ -841,6 +884,137 @@ func (f *Function) preserveContext(req *fnv1.RunFunctionRequest, rsp *fnv1.RunFu
 	}
 }
 
+// initializeResponse initializes the response with desired XR and preserves context
+func (f *Function) initializeResponse(req *fnv1.RunFunctionRequest, rsp *fnv1.RunFunctionResponse) error {
+	// Ensure oxr to dxr gets propagated and we keep status around
+	if err := f.propagateDesiredXR(req, rsp); err != nil {
+		return err
+	}
+	// Ensure the context is preserved
+	f.preserveContext(req, rsp)
+	return nil
+}
+
+// validateAndPrepareInput validates the input and prepares it for execution
+func (f *Function) validateAndPrepareInput(_ context.Context, req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) bool {
+	// Check if target is valid
+	if !f.isValidTarget(in.Target) {
+		response.Fatal(rsp, errors.Errorf("Unrecognized target field: %s", in.Target))
+		return false
+	}
+
+	// Check if we should skip the query
+	if f.shouldSkipQuery(req, in, rsp) {
+		// Set success condition
+		response.ConditionTrue(rsp, "FunctionSuccess", "Success").
+			TargetCompositeAndClaim()
+		return false
+	}
+
+	// Process references based on query type
+	if !f.processReferences(req, in, rsp) {
+		return false
+	}
+
+	return true
+}
+
+// processReferences handles resolving references like groupRef, groupsRef, usersRef, and servicePrincipalsRef
+func (f *Function) processReferences(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) bool {
+	// Process references based on query type
+	switch in.QueryType {
+	case "GroupMembership":
+		return f.processGroupRef(req, in, rsp)
+	case "GroupObjectIDs":
+		return f.processGroupsRef(req, in, rsp)
+	case "UserValidation":
+		return f.processUsersRef(req, in, rsp)
+	case "ServicePrincipalDetails":
+		return f.processServicePrincipalsRef(req, in, rsp)
+	}
+	return true
+}
+
+// processGroupRef handles resolving the groupRef reference for GroupMembership query type
+func (f *Function) processGroupRef(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) bool {
+	if in.GroupRef == nil || *in.GroupRef == "" {
+		return true
+	}
+
+	groupName, err := f.resolveGroupRef(req, in.GroupRef)
+	if err != nil {
+		response.Fatal(rsp, err)
+		return false
+	}
+	in.Group = &groupName
+	f.log.Info("Resolved GroupRef to group", "group", groupName, "groupRef", *in.GroupRef)
+	return true
+}
+
+// processGroupsRef handles resolving the groupsRef reference for GroupObjectIDs query type
+func (f *Function) processGroupsRef(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) bool {
+	if in.GroupsRef == nil || *in.GroupsRef == "" {
+		return true
+	}
+
+	groupNames, err := f.resolveGroupsRef(req, in.GroupsRef)
+	if err != nil {
+		response.Fatal(rsp, err)
+		return false
+	}
+	in.Groups = groupNames
+	f.log.Info("Resolved GroupsRef to groups", "groupCount", len(groupNames), "groupsRef", *in.GroupsRef)
+	return true
+}
+
+// processUsersRef handles resolving the usersRef reference for UserValidation query type
+func (f *Function) processUsersRef(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) bool {
+	if in.UsersRef == nil || *in.UsersRef == "" {
+		return true
+	}
+
+	userNames, err := f.resolveUsersRef(req, in.UsersRef)
+	if err != nil {
+		response.Fatal(rsp, err)
+		return false
+	}
+	in.Users = userNames
+	f.log.Info("Resolved UsersRef to users", "userCount", len(userNames), "usersRef", *in.UsersRef)
+	return true
+}
+
+// processServicePrincipalsRef handles resolving the servicePrincipalsRef reference for ServicePrincipalDetails query type
+func (f *Function) processServicePrincipalsRef(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse) bool {
+	if in.ServicePrincipalsRef == nil || *in.ServicePrincipalsRef == "" {
+		return true
+	}
+
+	spNames, err := f.resolveServicePrincipalsRef(req, in.ServicePrincipalsRef)
+	if err != nil {
+		response.Fatal(rsp, err)
+		return false
+	}
+	in.ServicePrincipals = spNames
+	f.log.Info("Resolved ServicePrincipalsRef to service principals", "spCount", len(spNames), "servicePrincipalsRef", *in.ServicePrincipalsRef)
+	return true
+}
+
+// executeAndProcessQuery executes the query and processes the results
+func (f *Function) executeAndProcessQuery(ctx context.Context, req *fnv1.RunFunctionRequest, in *v1beta1.Input, azureCreds map[string]string, rsp *fnv1.RunFunctionResponse) bool {
+	// Execute the query
+	results, err := f.executeQuery(ctx, azureCreds, in, rsp)
+	if err != nil {
+		return false
+	}
+
+	// Process the results
+	if err := f.processResults(req, in, results, rsp); err != nil {
+		return false
+	}
+
+	return true
+}
+
 // isValidTarget checks if the target is valid
 func (f *Function) isValidTarget(target string) bool {
 	return strings.HasPrefix(target, "status.") || strings.HasPrefix(target, "context.")
@@ -882,4 +1056,198 @@ func (f *Function) checkContextTargetHasData(req *fnv1.RunFunctionRequest, in *v
 		return true
 	}
 	return false
+}
+
+// resolveGroupRef resolves the group name from a reference in spec, status or context.
+func (f *Function) resolveGroupRef(req *fnv1.RunFunctionRequest, groupRef *string) (string, error) {
+	if groupRef == nil || *groupRef == "" {
+		return "", errors.New("empty groupRef provided")
+	}
+
+	refKey := *groupRef
+
+	// Use a proper switch statement instead of if-else chain
+	switch {
+	case strings.HasPrefix(refKey, "status."):
+		return f.resolveFromStatus(req, refKey)
+	case strings.HasPrefix(refKey, "context."):
+		return f.resolveFromContext(req, refKey)
+	case strings.HasPrefix(refKey, "spec."):
+		return f.resolveFromSpec(req, refKey)
+	default:
+		return "", errors.Errorf("unsupported groupRef format: %s", refKey)
+	}
+}
+
+// resolveFromStatus resolves a reference from XR status
+func (f *Function) resolveFromStatus(req *fnv1.RunFunctionRequest, refKey string) (string, error) {
+	xrStatus, _, err := f.getXRAndStatus(req)
+	if err != nil {
+		return "", errors.Wrap(err, "cannot get XR status")
+	}
+
+	statusField := strings.TrimPrefix(refKey, "status.")
+	value, ok := GetNestedKey(xrStatus, statusField)
+	if !ok {
+		return "", errors.Errorf("cannot resolve groupRef: %s not found", refKey)
+	}
+	return value, nil
+}
+
+// resolveFromContext resolves a reference from function context
+func (f *Function) resolveFromContext(req *fnv1.RunFunctionRequest, refKey string) (string, error) {
+	contextMap := req.GetContext().AsMap()
+	contextField := strings.TrimPrefix(refKey, "context.")
+	value, ok := GetNestedKey(contextMap, contextField)
+	if !ok {
+		return "", errors.Errorf("cannot resolve groupRef: %s not found", refKey)
+	}
+	return value, nil
+}
+
+// resolveFromSpec resolves a reference from XR spec
+func (f *Function) resolveFromSpec(req *fnv1.RunFunctionRequest, refKey string) (string, error) {
+	// Use getXRAndStatus to ensure spec is copied to desired XR
+	_, dxr, err := f.getXRAndStatus(req)
+	if err != nil {
+		return "", errors.Wrap(err, "cannot get XR status and desired XR")
+	}
+
+	// Get spec from the desired XR (which now has the spec copied from observed)
+	xrSpec := make(map[string]interface{})
+	err = dxr.Resource.GetValueInto("spec", &xrSpec)
+	if err != nil {
+		return "", errors.Wrap(err, "cannot get XR spec")
+	}
+
+	specField := strings.TrimPrefix(refKey, "spec.")
+	value, ok := GetNestedKey(xrSpec, specField)
+	if !ok {
+		return "", errors.Errorf("cannot resolve groupRef: %s not found", refKey)
+	}
+	return value, nil
+}
+
+// resolveStringArrayRef resolves a list of string values from a reference in spec, status or context
+func (f *Function) resolveStringArrayRef(req *fnv1.RunFunctionRequest, ref *string, refType string) ([]*string, error) {
+	if ref == nil || *ref == "" {
+		return nil, errors.Errorf("empty %s provided", refType)
+	}
+
+	refKey := *ref
+
+	var (
+		result []*string
+		err    error
+	)
+
+	// Use proper switch statement instead of if-else chain
+	switch {
+	case strings.HasPrefix(refKey, "status."):
+		result, err = f.resolveStringArrayFromStatus(req, refKey)
+	case strings.HasPrefix(refKey, "context."):
+		result, err = f.resolveStringArrayFromContext(req, refKey)
+	case strings.HasPrefix(refKey, "spec."):
+		result, err = f.resolveStringArrayFromSpec(req, refKey)
+	default:
+		return nil, errors.Errorf("unsupported %s format: %s", refType, refKey)
+	}
+
+	// If we got an error and it contains "groupsRef" but we're looking for a different ref type,
+	// replace it with the correct ref type
+	if err != nil && refType != "groupsRef" && strings.Contains(err.Error(), "groupsRef") {
+		errMsg := err.Error()
+		return nil, errors.New(strings.ReplaceAll(errMsg, "groupsRef", refType))
+	}
+
+	return result, err
+}
+
+// resolveStringArrayFromStatus resolves a list of string values from XR status
+func (f *Function) resolveStringArrayFromStatus(req *fnv1.RunFunctionRequest, refKey string) ([]*string, error) {
+	xrStatus, _, err := f.getXRAndStatus(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot get XR status")
+	}
+
+	statusField := strings.TrimPrefix(refKey, "status.")
+	return f.extractStringArrayFromMap(xrStatus, statusField, refKey)
+}
+
+// resolveStringArrayFromContext resolves a list of string values from function context
+func (f *Function) resolveStringArrayFromContext(req *fnv1.RunFunctionRequest, refKey string) ([]*string, error) {
+	contextMap := req.GetContext().AsMap()
+	contextField := strings.TrimPrefix(refKey, "context.")
+	return f.extractStringArrayFromMap(contextMap, contextField, refKey)
+}
+
+// resolveStringArrayFromSpec resolves a list of string values from XR spec
+func (f *Function) resolveStringArrayFromSpec(req *fnv1.RunFunctionRequest, refKey string) ([]*string, error) {
+	// Use getXRAndStatus to ensure spec is copied to desired XR
+	_, dxr, err := f.getXRAndStatus(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot get XR status and desired XR")
+	}
+
+	// Get spec from the desired XR (which now has the spec copied from observed)
+	xrSpec := make(map[string]interface{})
+	err = dxr.Resource.GetValueInto("spec", &xrSpec)
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot get XR spec")
+	}
+
+	specField := strings.TrimPrefix(refKey, "spec.")
+	return f.extractStringArrayFromMap(xrSpec, specField, refKey)
+}
+
+// resolveGroupsRef resolves a list of group names from a reference in status or context
+func (f *Function) resolveGroupsRef(req *fnv1.RunFunctionRequest, groupsRef *string) ([]*string, error) {
+	return f.resolveStringArrayRef(req, groupsRef, "groupsRef")
+}
+
+// resolveUsersRef resolves a list of user names from a reference in status or context
+func (f *Function) resolveUsersRef(req *fnv1.RunFunctionRequest, usersRef *string) ([]*string, error) {
+	return f.resolveStringArrayRef(req, usersRef, "usersRef")
+}
+
+// resolveServicePrincipalsRef resolves a list of service principal names from a reference in status or context
+func (f *Function) resolveServicePrincipalsRef(req *fnv1.RunFunctionRequest, servicePrincipalsRef *string) ([]*string, error) {
+	return f.resolveStringArrayRef(req, servicePrincipalsRef, "servicePrincipalsRef")
+}
+
+// extractStringArrayFromMap extracts a string array from a map using nested key
+func (f *Function) extractStringArrayFromMap(dataMap map[string]interface{}, field, refKey string) ([]*string, error) {
+	parts, err := ParseNestedKey(field)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid field key")
+	}
+
+	currentValue := interface{}(dataMap)
+	for _, k := range parts {
+		if nestedMap, ok := currentValue.(map[string]interface{}); ok {
+			if nextValue, exists := nestedMap[k]; exists {
+				currentValue = nextValue
+			} else {
+				return nil, errors.Errorf("cannot resolve groupsRef: %s not found", refKey)
+			}
+		} else {
+			return nil, errors.Errorf("cannot resolve groupsRef: %s not a map", refKey)
+		}
+	}
+
+	// The current value should be a slice of strings
+	if strArray, ok := currentValue.([]interface{}); ok {
+		result := make([]*string, 0, len(strArray))
+		for _, val := range strArray {
+			if strVal, ok := val.(string); ok {
+				strCopy := strVal // Create a new string to avoid pointing to a loop variable
+				result = append(result, &strCopy)
+			}
+		}
+		if len(result) > 0 {
+			return result, nil
+		}
+	}
+
+	return nil, errors.Errorf("cannot resolve groupsRef: %s not a string array or empty", refKey)
 }

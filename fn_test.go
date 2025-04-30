@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -27,6 +28,1598 @@ func (m *MockGraphQuery) graphQuery(ctx context.Context, azureCreds map[string]s
 
 func strPtr(s string) *string {
 	return &s
+}
+
+// TestResolveGroupsRef tests the functionality of resolving groupsRef from context, status, or spec
+func TestResolveGroupsRef(t *testing.T) {
+	var (
+		xr    = `{"apiVersion":"example.org/v1","kind":"XR","metadata":{"name":"cool-xr"},"spec":{"count":2}}`
+		creds = &fnv1.CredentialData{
+			Data: map[string][]byte{
+				"credentials": []byte(`{
+"clientId": "test-client-id",
+"clientSecret": "test-client-secret",
+"subscriptionId": "test-subscription-id",
+"tenantId": "test-tenant-id"
+}`),
+			},
+		}
+	)
+
+	type args struct {
+		ctx context.Context
+		req *fnv1.RunFunctionRequest
+	}
+	type want struct {
+		rsp *fnv1.RunFunctionResponse
+		err error
+	}
+
+	cases := map[string]struct {
+		reason string
+		args   args
+		want   want
+	}{
+		"GroupsRefFromStatus": {
+			reason: "The Function should resolve groupsRef from XR status",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "GroupObjectIDs",
+						"groupsRef": "status.groups",
+						"target": "status.groupObjectIDs"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"status": {
+									"groups": ["Developers", "Operations", "All Company"]
+								}
+							}`),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "GroupObjectIDs"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"status": {
+									"groups": ["Developers", "Operations", "All Company"],
+									"groupObjectIDs": [
+										{
+											"id": "group-id-1",
+											"displayName": "Developers",
+											"description": "Development team"
+										},
+										{
+											"id": "group-id-2",
+											"displayName": "Operations",
+											"description": "Operations team"
+										},
+										{
+											"id": "group-id-3",
+											"displayName": "All Company",
+											"description": "All company group"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"GroupsRefFromContext": {
+			reason: "The Function should resolve groupsRef from context",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "GroupObjectIDs",
+						"groupsRef": "context.groups",
+						"target": "status.groupObjectIDs"
+					}`),
+					Context: resource.MustStructJSON(`{
+						"groups": ["Developers", "Operations", "All Company"]
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "GroupObjectIDs"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Context: resource.MustStructJSON(`{
+						"groups": ["Developers", "Operations", "All Company"]
+					}`),
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"metadata": {
+									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
+								},
+								"status": {
+									"groupObjectIDs": [
+										{
+											"id": "group-id-1",
+											"displayName": "Developers",
+											"description": "Development team"
+										},
+										{
+											"id": "group-id-2",
+											"displayName": "Operations",
+											"description": "Operations team"
+										},
+										{
+											"id": "group-id-3",
+											"displayName": "All Company",
+											"description": "All company group"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"GroupsRefFromSpec": {
+			reason: "The Function should resolve groupsRef from XR spec",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "GroupObjectIDs",
+						"groupsRef": "spec.groupConfig.groupNames",
+						"target": "status.groupObjectIDs"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"spec": {
+									"groupConfig": {
+										"groupNames": ["Developers", "Operations", "All Company"]
+									}
+								}
+							}`),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "GroupObjectIDs"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"spec": {
+									"groupConfig": {
+										"groupNames": ["Developers", "Operations", "All Company"]
+									}
+								},
+								"status": {
+									"groupObjectIDs": [
+										{
+											"id": "group-id-1",
+											"displayName": "Developers",
+											"description": "Development team"
+										},
+										{
+											"id": "group-id-2",
+											"displayName": "Operations",
+											"description": "Operations team"
+										},
+										{
+											"id": "group-id-3",
+											"displayName": "All Company",
+											"description": "All company group"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"GroupsRefNotFound": {
+			reason: "The Function should handle an error when groupsRef cannot be resolved",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "GroupObjectIDs",
+						"groupsRef": "context.nonexistent.value",
+						"target": "status.groupObjectIDs"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  "cannot resolve groupsRef: context.nonexistent.value not found",
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"metadata": {
+									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
+								}
+							}`),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			// Create mock responders for each type of query
+			mockQuery := &MockGraphQuery{
+				GraphQueryFunc: func(_ context.Context, _ map[string]string, in *v1beta1.Input) (interface{}, error) {
+					if in.QueryType == "GroupObjectIDs" {
+						if len(in.Groups) == 0 {
+							return nil, errors.New("no group names provided")
+						}
+
+						var results []interface{}
+						for i, group := range in.Groups {
+							if group == nil {
+								continue
+							}
+
+							groupID := fmt.Sprintf("group-id-%d", i+1)
+							var description string
+							switch *group {
+							case "Operations":
+								description = "Operations team"
+							case "All Company":
+								description = "All company group"
+							default:
+								description = "Development team"
+							}
+
+							groupMap := map[string]interface{}{
+								"id":          groupID,
+								"displayName": *group,
+								"description": description,
+							}
+							results = append(results, groupMap)
+						}
+						return results, nil
+					}
+					return nil, errors.Errorf("unsupported query type: %s", in.QueryType)
+				},
+			}
+
+			f := &Function{
+				graphQuery: mockQuery,
+				log:        logging.NewNopLogger(),
+			}
+			rsp, err := f.RunFunction(tc.args.ctx, tc.args.req)
+
+			if diff := cmp.Diff(tc.want.rsp, rsp, protocmp.Transform()); diff != "" {
+				t.Errorf("%s\nf.RunFunction(...): -want rsp, +got rsp:\n%s", tc.reason, diff)
+			}
+
+			if diff := cmp.Diff(tc.want.err, err, cmpopts.EquateErrors()); diff != "" {
+				t.Errorf("%s\nf.RunFunction(...): -want err, +got err:\n%s", tc.reason, diff)
+			}
+		})
+	}
+}
+
+// TestResolveGroupRef tests the functionality of resolving groupRef from context, status, or spec
+func TestResolveGroupRef(t *testing.T) {
+	var (
+		xr    = `{"apiVersion":"example.org/v1","kind":"XR","metadata":{"name":"cool-xr"},"spec":{"count":2}}`
+		creds = &fnv1.CredentialData{
+			Data: map[string][]byte{
+				"credentials": []byte(`{
+"clientId": "test-client-id",
+"clientSecret": "test-client-secret",
+"subscriptionId": "test-subscription-id",
+"tenantId": "test-tenant-id"
+}`),
+			},
+		}
+	)
+
+	type args struct {
+		ctx context.Context
+		req *fnv1.RunFunctionRequest
+	}
+	type want struct {
+		rsp *fnv1.RunFunctionResponse
+		err error
+	}
+
+	cases := map[string]struct {
+		reason string
+		args   args
+		want   want
+	}{
+		"GroupRefFromStatus": {
+			reason: "The Function should resolve groupRef from XR status",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "GroupMembership",
+						"groupRef": "status.groupInfo.name",
+						"target": "status.groupMembers"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"status": {
+									"groupInfo": {
+										"name": "Developers"
+									}
+								}
+							}`),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "GroupMembership"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"status": {
+									"groupInfo": {
+										"name": "Developers"
+									},
+									"groupMembers": [
+										{
+											"id": "user-id-1",
+											"displayName": "Test User 1",
+											"mail": "user1@example.com",
+											"type": "user",
+											"userPrincipalName": "user1@example.com"
+										},
+										{
+											"id": "sp-id-1",
+											"displayName": "Test Service Principal",
+											"appId": "sp-app-id-1",
+											"type": "servicePrincipal"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"GroupRefFromContext": {
+			reason: "The Function should resolve groupRef from context",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "GroupMembership",
+						"groupRef": "context.groupInfo.name",
+						"target": "status.groupMembers"
+					}`),
+					Context: resource.MustStructJSON(`{
+						"groupInfo": {
+							"name": "Developers"
+						}
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "GroupMembership"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Context: resource.MustStructJSON(`{
+						"groupInfo": {
+							"name": "Developers"
+						}
+					}`),
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"metadata": {
+									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
+								},
+								"status": {
+									"groupMembers": [
+										{
+											"id": "user-id-1",
+											"displayName": "Test User 1",
+											"mail": "user1@example.com",
+											"type": "user",
+											"userPrincipalName": "user1@example.com"
+										},
+										{
+											"id": "sp-id-1",
+											"displayName": "Test Service Principal",
+											"appId": "sp-app-id-1",
+											"type": "servicePrincipal"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"GroupRefFromSpec": {
+			reason: "The Function should resolve groupRef from XR spec",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "GroupMembership",
+						"groupRef": "spec.groupConfig.name",
+						"target": "status.groupMembers"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"spec": {
+									"groupConfig": {
+										"name": "Developers"
+									}
+								}
+							}`),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "GroupMembership"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"spec": {
+									"groupConfig": {
+										"name": "Developers"
+									}
+								},
+								"status": {
+									"groupMembers": [
+										{
+											"id": "user-id-1",
+											"displayName": "Test User 1",
+											"mail": "user1@example.com",
+											"type": "user",
+											"userPrincipalName": "user1@example.com"
+										},
+										{
+											"id": "sp-id-1",
+											"displayName": "Test Service Principal",
+											"appId": "sp-app-id-1",
+											"type": "servicePrincipal"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"GroupRefNotFound": {
+			reason: "The Function should handle an error when groupRef cannot be resolved",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "GroupMembership",
+						"groupRef": "context.nonexistent.value",
+						"target": "status.groupMembers"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  "cannot resolve groupRef: context.nonexistent.value not found",
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"metadata": {
+									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
+								}
+							}`),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			// Create mock responders for each type of query
+			mockQuery := &MockGraphQuery{
+				GraphQueryFunc: func(_ context.Context, _ map[string]string, in *v1beta1.Input) (interface{}, error) {
+					if in.QueryType == "GroupMembership" {
+						if in.Group == nil || *in.Group == "" {
+							return nil, errors.New("no group name provided")
+						}
+						return []interface{}{
+							map[string]interface{}{
+								"id":                "user-id-1",
+								"displayName":       "Test User 1",
+								"mail":              "user1@example.com",
+								"userPrincipalName": "user1@example.com",
+								"type":              "user",
+							},
+							map[string]interface{}{
+								"id":          "sp-id-1",
+								"displayName": "Test Service Principal",
+								"appId":       "sp-app-id-1",
+								"type":        "servicePrincipal",
+							},
+						}, nil
+					}
+					return nil, errors.Errorf("unsupported query type: %s", in.QueryType)
+				},
+			}
+
+			f := &Function{
+				graphQuery: mockQuery,
+				log:        logging.NewNopLogger(),
+			}
+			rsp, err := f.RunFunction(tc.args.ctx, tc.args.req)
+
+			if diff := cmp.Diff(tc.want.rsp, rsp, protocmp.Transform()); diff != "" {
+				t.Errorf("%s\nf.RunFunction(...): -want rsp, +got rsp:\n%s", tc.reason, diff)
+			}
+
+			if diff := cmp.Diff(tc.want.err, err, cmpopts.EquateErrors()); diff != "" {
+				t.Errorf("%s\nf.RunFunction(...): -want err, +got err:\n%s", tc.reason, diff)
+			}
+		})
+	}
+}
+
+// TestResolveUsersRef tests the functionality of resolving usersRef from context, status, or spec
+func TestResolveUsersRef(t *testing.T) {
+	var (
+		xr    = `{"apiVersion":"example.org/v1","kind":"XR","metadata":{"name":"cool-xr"},"spec":{"count":2}}`
+		creds = &fnv1.CredentialData{
+			Data: map[string][]byte{
+				"credentials": []byte(`{
+"clientId": "test-client-id",
+"clientSecret": "test-client-secret",
+"subscriptionId": "test-subscription-id",
+"tenantId": "test-tenant-id"
+}`),
+			},
+		}
+	)
+
+	type args struct {
+		ctx context.Context
+		req *fnv1.RunFunctionRequest
+	}
+	type want struct {
+		rsp *fnv1.RunFunctionResponse
+		err error
+	}
+
+	cases := map[string]struct {
+		reason string
+		args   args
+		want   want
+	}{
+		"UsersRefFromStatus": {
+			reason: "The Function should resolve usersRef from XR status",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"usersRef": "status.users",
+						"target": "status.validatedUsers"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"status": {
+									"users": ["user1@example.com", "user2@example.com", "admin@example.onmicrosoft.com"]
+								}
+							}`),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "UserValidation"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"status": {
+									"users": ["user1@example.com", "user2@example.com", "admin@example.onmicrosoft.com"],
+									"validatedUsers": [
+										{
+											"id": "user-id-1",
+											"displayName": "User 1",
+											"userPrincipalName": "user1@example.com",
+											"mail": "user1@example.com"
+										},
+										{
+											"id": "user-id-2",
+											"displayName": "User 2",
+											"userPrincipalName": "user2@example.com",
+											"mail": "user2@example.com"
+										},
+										{
+											"id": "admin-id",
+											"displayName": "Admin User",
+											"userPrincipalName": "admin@example.onmicrosoft.com",
+											"mail": "admin@example.onmicrosoft.com"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"UsersRefFromContext": {
+			reason: "The Function should resolve usersRef from context",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"usersRef": "context.users",
+						"target": "status.validatedUsers"
+					}`),
+					Context: resource.MustStructJSON(`{
+						"users": ["user1@example.com", "user2@example.com", "admin@example.onmicrosoft.com"]
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "UserValidation"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Context: resource.MustStructJSON(`{
+						"users": ["user1@example.com", "user2@example.com", "admin@example.onmicrosoft.com"]
+					}`),
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"metadata": {
+									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
+								},
+								"status": {
+									"validatedUsers": [
+										{
+											"id": "user-id-1",
+											"displayName": "User 1",
+											"userPrincipalName": "user1@example.com",
+											"mail": "user1@example.com"
+										},
+										{
+											"id": "user-id-2",
+											"displayName": "User 2",
+											"userPrincipalName": "user2@example.com",
+											"mail": "user2@example.com"
+										},
+										{
+											"id": "admin-id",
+											"displayName": "Admin User",
+											"userPrincipalName": "admin@example.onmicrosoft.com",
+											"mail": "admin@example.onmicrosoft.com"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"UsersRefFromSpec": {
+			reason: "The Function should resolve usersRef from XR spec",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"usersRef": "spec.userAccess.emails",
+						"target": "status.validatedUsers"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"spec": {
+									"userAccess": {
+										"emails": ["user1@example.com", "user2@example.com", "admin@example.onmicrosoft.com"]
+									}
+								}
+							}`),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "UserValidation"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"spec": {
+									"userAccess": {
+										"emails": ["user1@example.com", "user2@example.com", "admin@example.onmicrosoft.com"]
+									}
+								},
+								"status": {
+									"validatedUsers": [
+										{
+											"id": "user-id-1",
+											"displayName": "User 1",
+											"userPrincipalName": "user1@example.com",
+											"mail": "user1@example.com"
+										},
+										{
+											"id": "user-id-2",
+											"displayName": "User 2",
+											"userPrincipalName": "user2@example.com",
+											"mail": "user2@example.com"
+										},
+										{
+											"id": "admin-id",
+											"displayName": "Admin User",
+											"userPrincipalName": "admin@example.onmicrosoft.com",
+											"mail": "admin@example.onmicrosoft.com"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"UsersRefNotFound": {
+			reason: "The Function should handle an error when usersRef cannot be resolved",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"usersRef": "context.nonexistent.value",
+						"target": "status.validatedUsers"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  "cannot resolve usersRef: context.nonexistent.value not found",
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"metadata": {
+									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
+								}
+							}`),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			// Create mock responders for each type of query
+			mockQuery := &MockGraphQuery{
+				GraphQueryFunc: func(_ context.Context, _ map[string]string, in *v1beta1.Input) (interface{}, error) {
+					if in.QueryType == "UserValidation" {
+						if len(in.Users) == 0 {
+							return nil, errors.New("no users provided for validation")
+						}
+
+						var results []interface{}
+						for _, user := range in.Users {
+							if user == nil {
+								continue
+							}
+
+							var (
+								userID      string
+								displayName string
+							)
+
+							// Generate different test data based on user principal name
+							switch *user {
+							case "user1@example.com":
+								userID = "user-id-1"
+								displayName = "User 1"
+							case "user2@example.com":
+								userID = "user-id-2"
+								displayName = "User 2"
+							case "admin@example.onmicrosoft.com":
+								userID = "admin-id"
+								displayName = "Admin User"
+							default:
+								userID = "test-user-id"
+								displayName = "Test User"
+							}
+
+							userMap := map[string]interface{}{
+								"id":                userID,
+								"displayName":       displayName,
+								"userPrincipalName": *user,
+								"mail":              *user,
+							}
+							results = append(results, userMap)
+						}
+						return results, nil
+					}
+					return nil, errors.Errorf("unsupported query type: %s", in.QueryType)
+				},
+			}
+
+			f := &Function{
+				graphQuery: mockQuery,
+				log:        logging.NewNopLogger(),
+			}
+			rsp, err := f.RunFunction(tc.args.ctx, tc.args.req)
+
+			if diff := cmp.Diff(tc.want.rsp, rsp, protocmp.Transform()); diff != "" {
+				t.Errorf("%s\nf.RunFunction(...): -want rsp, +got rsp:\n%s", tc.reason, diff)
+			}
+
+			if diff := cmp.Diff(tc.want.err, err, cmpopts.EquateErrors()); diff != "" {
+				t.Errorf("%s\nf.RunFunction(...): -want err, +got err:\n%s", tc.reason, diff)
+			}
+		})
+	}
+}
+
+// TestResolveServicePrincipalsRef tests the functionality of resolving servicePrincipalsRef from context, status, or spec
+func TestResolveServicePrincipalsRef(t *testing.T) {
+	var (
+		xr    = `{"apiVersion":"example.org/v1","kind":"XR","metadata":{"name":"cool-xr"},"spec":{"count":2}}`
+		creds = &fnv1.CredentialData{
+			Data: map[string][]byte{
+				"credentials": []byte(`{
+"clientId": "test-client-id",
+"clientSecret": "test-client-secret",
+"subscriptionId": "test-subscription-id",
+"tenantId": "test-tenant-id"
+}`),
+			},
+		}
+	)
+
+	type args struct {
+		ctx context.Context
+		req *fnv1.RunFunctionRequest
+	}
+	type want struct {
+		rsp *fnv1.RunFunctionResponse
+		err error
+	}
+
+	cases := map[string]struct {
+		reason string
+		args   args
+		want   want
+	}{
+		"ServicePrincipalsRefFromStatus": {
+			reason: "The Function should resolve servicePrincipalsRef from XR status",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "ServicePrincipalDetails",
+						"servicePrincipalsRef": "status.servicePrincipalNames",
+						"target": "status.servicePrincipals"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"status": {
+									"servicePrincipalNames": ["MyServiceApp", "ApiConnector", "yury-upbound-oidc-provider"]
+								}
+							}`),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "ServicePrincipalDetails"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"status": {
+									"servicePrincipalNames": ["MyServiceApp", "ApiConnector", "yury-upbound-oidc-provider"],
+									"servicePrincipals": [
+										{
+											"id": "sp-id-1",
+											"appId": "app-id-1",
+											"displayName": "MyServiceApp",
+											"description": "Service application"
+										},
+										{
+											"id": "sp-id-2",
+											"appId": "app-id-2",
+											"displayName": "ApiConnector",
+											"description": "API connector application"
+										},
+										{
+											"id": "sp-id-3",
+											"appId": "app-id-3",
+											"displayName": "yury-upbound-oidc-provider",
+											"description": "OIDC provider application"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"ServicePrincipalsRefFromContext": {
+			reason: "The Function should resolve servicePrincipalsRef from context",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "ServicePrincipalDetails",
+						"servicePrincipalsRef": "context.servicePrincipalNames",
+						"target": "status.servicePrincipals"
+					}`),
+					Context: resource.MustStructJSON(`{
+						"servicePrincipalNames": ["MyServiceApp", "ApiConnector", "yury-upbound-oidc-provider"]
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "ServicePrincipalDetails"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Context: resource.MustStructJSON(`{
+						"servicePrincipalNames": ["MyServiceApp", "ApiConnector", "yury-upbound-oidc-provider"]
+					}`),
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"metadata": {
+									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
+								},
+								"status": {
+									"servicePrincipals": [
+										{
+											"id": "sp-id-1",
+											"appId": "app-id-1",
+											"displayName": "MyServiceApp",
+											"description": "Service application"
+										},
+										{
+											"id": "sp-id-2",
+											"appId": "app-id-2",
+											"displayName": "ApiConnector",
+											"description": "API connector application"
+										},
+										{
+											"id": "sp-id-3",
+											"appId": "app-id-3",
+											"displayName": "yury-upbound-oidc-provider",
+											"description": "OIDC provider application"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"ServicePrincipalsRefFromSpec": {
+			reason: "The Function should resolve servicePrincipalsRef from XR spec",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "ServicePrincipalDetails",
+						"servicePrincipalsRef": "spec.servicePrincipalConfig.names",
+						"target": "status.servicePrincipals"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"spec": {
+									"servicePrincipalConfig": {
+										"names": ["MyServiceApp", "ApiConnector", "yury-upbound-oidc-provider"]
+									}
+								}
+							}`),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "ServicePrincipalDetails"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"spec": {
+									"servicePrincipalConfig": {
+										"names": ["MyServiceApp", "ApiConnector", "yury-upbound-oidc-provider"]
+									}
+								},
+								"status": {
+									"servicePrincipals": [
+										{
+											"id": "sp-id-1",
+											"appId": "app-id-1",
+											"displayName": "MyServiceApp",
+											"description": "Service application"
+										},
+										{
+											"id": "sp-id-2",
+											"appId": "app-id-2",
+											"displayName": "ApiConnector",
+											"description": "API connector application"
+										},
+										{
+											"id": "sp-id-3",
+											"appId": "app-id-3",
+											"displayName": "yury-upbound-oidc-provider",
+											"description": "OIDC provider application"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"ServicePrincipalsRefNotFound": {
+			reason: "The Function should handle an error when servicePrincipalsRef cannot be resolved",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "ServicePrincipalDetails",
+						"servicePrincipalsRef": "context.nonexistent.value",
+						"target": "status.servicePrincipals"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  "cannot resolve servicePrincipalsRef: context.nonexistent.value not found",
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"metadata": {
+									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
+								}
+							}`),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			// Create mock responders for each type of query
+			mockQuery := &MockGraphQuery{
+				GraphQueryFunc: func(_ context.Context, _ map[string]string, in *v1beta1.Input) (interface{}, error) {
+					if in.QueryType == "ServicePrincipalDetails" {
+						if len(in.ServicePrincipals) == 0 {
+							return nil, errors.New("no service principal names provided")
+						}
+
+						var results []interface{}
+						for i, sp := range in.ServicePrincipals {
+							if sp == nil {
+								continue
+							}
+
+							var (
+								spID        string
+								appID       string
+								description string
+							)
+
+							// Generate different test data based on service principal name
+							switch *sp {
+							case "MyServiceApp":
+								spID = "sp-id-1"
+								appID = "app-id-1"
+								description = "Service application"
+							case "ApiConnector":
+								spID = "sp-id-2"
+								appID = "app-id-2"
+								description = "API connector application"
+							case "yury-upbound-oidc-provider":
+								spID = "sp-id-3"
+								appID = "app-id-3"
+								description = "OIDC provider application"
+							default:
+								spID = fmt.Sprintf("sp-id-%d", i+1)
+								appID = fmt.Sprintf("app-id-%d", i+1)
+								description = "Generic service principal"
+							}
+
+							spMap := map[string]interface{}{
+								"id":          spID,
+								"appId":       appID,
+								"displayName": *sp,
+								"description": description,
+							}
+							results = append(results, spMap)
+						}
+						return results, nil
+					}
+					return nil, errors.Errorf("unsupported query type: %s", in.QueryType)
+				},
+			}
+
+			f := &Function{
+				graphQuery: mockQuery,
+				log:        logging.NewNopLogger(),
+			}
+			rsp, err := f.RunFunction(tc.args.ctx, tc.args.req)
+
+			if diff := cmp.Diff(tc.want.rsp, rsp, protocmp.Transform()); diff != "" {
+				t.Errorf("%s\nf.RunFunction(...): -want rsp, +got rsp:\n%s", tc.reason, diff)
+			}
+
+			if diff := cmp.Diff(tc.want.err, err, cmpopts.EquateErrors()); diff != "" {
+				t.Errorf("%s\nf.RunFunction(...): -want err, +got err:\n%s", tc.reason, diff)
+			}
+		})
+	}
 }
 
 func TestRunFunction(t *testing.T) {
@@ -173,6 +1766,9 @@ func TestRunFunction(t *testing.T) {
 								"kind": "XR",
 								"metadata": {
 									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
 								}
 							}`),
 						},
@@ -231,6 +1827,9 @@ func TestRunFunction(t *testing.T) {
 								"metadata": {
 									"name": "cool-xr"
 								},
+								"spec": {
+									"count": 2
+								},
 								"status": {
 									"validatedUsers": [
 										{
@@ -287,6 +1886,9 @@ func TestRunFunction(t *testing.T) {
 								"kind": "XR",
 								"metadata": {
 									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
 								}
 							}`),
 						},
@@ -344,6 +1946,9 @@ func TestRunFunction(t *testing.T) {
 								"kind": "XR",
 								"metadata": {
 									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
 								},
 								"status": {
 									"groupMembers": [
@@ -408,6 +2013,9 @@ func TestRunFunction(t *testing.T) {
 								"kind": "XR",
 								"metadata": {
 									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
 								}
 							}`),
 						},
@@ -465,6 +2073,9 @@ func TestRunFunction(t *testing.T) {
 								"kind": "XR",
 								"metadata": {
 									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
 								},
 								"status": {
 									"groupObjectIDs": [
@@ -526,6 +2137,9 @@ func TestRunFunction(t *testing.T) {
 								"kind": "XR",
 								"metadata": {
 									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
 								}
 							}`),
 						},
@@ -584,6 +2198,9 @@ func TestRunFunction(t *testing.T) {
 								"metadata": {
 									"name": "cool-xr"
 								},
+								"spec": {
+									"count": 2
+								},
 								"status": {
 									"servicePrincipals": [
 										{
@@ -640,6 +2257,9 @@ func TestRunFunction(t *testing.T) {
 								"kind": "XR",
 								"metadata": {
 									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
 								}
 							}`),
 						},
@@ -786,6 +2406,9 @@ func TestRunFunction(t *testing.T) {
 								"kind": "XR",
 								"metadata": {
 									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
 								}
 							}`),
 						},

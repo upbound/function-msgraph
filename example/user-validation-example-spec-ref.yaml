@@ -1,30 +1,26 @@
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
-  name: group-objectids-example
-  annotations:
-    # Important: This function requires an Azure AD app registration with Microsoft Graph API permissions:
-    # - Group.Read.All
-    # - Directory.Read.All
+  name: user-validation-example-spec-ref
+# Important: This function example requires an Azure AD app registration with Microsoft Graph API permissions:
+# - User.Read.All
+# - Directory.Read.All
 spec:
   compositeTypeRef:
     apiVersion: example.crossplane.io/v1
     kind: XR
   mode: Pipeline
   pipeline:
-    - step: get-group-objectids
+    - step: validate-user
       functionRef:
         name: function-msgraph
       input:
         apiVersion: msgraph.fn.crossplane.io/v1alpha1
         kind: Input
-        queryType: GroupObjectIDs
-        groups:
-          - "Developers"
-          - "All Engineering"
-          - "All Company"
-          - test-fn-msgraph
-        target: "status.groupObjectIDs"
+        queryType: UserValidation
+        # Using spec reference to get user emails
+        usersRef: "spec.userAccess.emails"
+        target: "status.validatedUsers"
         skipQueryWhenTargetHasData: true
       credentials:
         - name: azure-creds

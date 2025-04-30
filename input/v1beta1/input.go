@@ -27,17 +27,37 @@ type Input struct {
 	// +optional
 	Users []*string `json:"users,omitempty"`
 
+	// UsersRef is a reference to retrieve the user names (e.g., from status or context)
+	// Overrides Users field if used
+	// +optional
+	UsersRef *string `json:"usersRef,omitempty"`
+
 	// Groups is a list of group names for group object ID queries
 	// +optional
 	Groups []*string `json:"groups,omitempty"`
+
+	// GroupsRef is a reference to retrieve the group names (e.g., from status or context)
+	// Overrides Groups field if used
+	// +optional
+	GroupsRef *string `json:"groupsRef,omitempty"`
 
 	// Group is a single group name for group membership queries
 	// +optional
 	Group *string `json:"group,omitempty"`
 
+	// GroupRef is a reference to retrieve the group name (e.g., from status or context)
+	// Overrides Group field if used
+	// +optional
+	GroupRef *string `json:"groupRef,omitempty"`
+
 	// ServicePrincipals is a list of service principal names
 	// +optional
 	ServicePrincipals []*string `json:"servicePrincipals,omitempty"`
+
+	// ServicePrincipalsRef is a reference to retrieve the service principal names (e.g., from status or context)
+	// Overrides ServicePrincipals field if used
+	// +optional
+	ServicePrincipalsRef *string `json:"servicePrincipalsRef,omitempty"`
 
 	// Target where to store the Query Result
 	Target string `json:"target"`
