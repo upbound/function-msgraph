@@ -11,7 +11,7 @@ require (
 	github.com/crossplane/function-sdk-go v0.4.0
 	github.com/google/go-cmp v0.7.0
 	github.com/microsoft/kiota-authentication-azure-go v1.3.0
-	github.com/microsoftgraph/msgraph-sdk-go v1.70.0
+	github.com/microsoftgraph/msgraph-sdk-go v1.71.0
 	google.golang.org/protobuf v1.36.6
 	k8s.io/apimachinery v0.32.3
 	sigs.k8s.io/controller-tools v0.17.3
