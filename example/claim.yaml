@@ -1,0 +1,14 @@
+apiVersion: example.crossplane.io/v1
+kind: XApproval
+metadata:
+  name: approval-example
+spec:
+  resources:
+    data:
+      key1: value1
+      key2: value2
+      config: |
+        # Example configuration
+        port: 8080
+        debug: true
+        environment: development

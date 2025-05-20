@@ -1,9 +1,41 @@
-To get started:
+FUNCTION-APPROVE IMPLEMENTATION NOTES
 
-1. Replace `function-template-go` with your function in `go.mod`,
-   `package/crossplane.yaml`, and any Go imports. (You can also do this
-   automatically by running the `./init.sh <function-name>` script.)
-2. Update `input/v1beta1/` to reflect your desired input (and run `go generate`)
-3. Add your logic to `RunFunction` in `fn.go`
-4. Add tests for your logic in `fn_test.go`
-5. Update `README.md`, to be about your function!
+This function implements a serverless manual approval workflow for Crossplane, as requested by the customer.
+
+Key Components:
+
+1. Hash Calculation:
+   - Computes a hash of specified field (e.g., spec.resources)
+   - Supports md5, sha256, and sha512 algorithms
+   - Stores current hash in status.newHash
+
+2. Hash Comparison:
+   - Compares new hash with previously approved hash (status.oldHash)
+   - If different, indicates a change requiring approval
+
+3. Approval Mechanism:
+   - Uses status.approved (boolean) for manual approval
+   - When changes detected, pauses reconciliation until approved
+   - After approval, updates oldHash to newHash for future comparisons
+
+4. Reconciliation Pausing:
+   - Adds crossplane.io/paused annotation when changes detected
+   - Removes annotation when changes approved
+   - Prevents drift of managed resources
+
+5. Condition Reporting:
+   - Sets ApprovalRequired condition when changes detected
+   - Provides detailed information about changes and approval steps
+
+Usage Flow:
+1. Resource created or updated (hash calculated & stored)
+2. If not previously approved or hash changed:
+   - Set ApprovalRequired condition
+   - Add pause annotation
+3. Admin approves by setting status.approved = true
+4. Next reconciliation:
+   - Store approved hash
+   - Remove pause annotation
+   - Resume reconciliation
+
+No external dependencies required - all functionality implemented using Crossplane native mechanisms.

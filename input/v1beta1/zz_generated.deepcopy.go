@@ -13,67 +13,39 @@ func (in *Input) DeepCopyInto(out *Input) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
 	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
-	if in.Users != nil {
-		in, out := &in.Users, &out.Users
-		*out = make([]*string, len(*in))
-		for i := range *in {
-			if (*in)[i] != nil {
-				in, out := &(*in)[i], &(*out)[i]
-				*out = new(string)
-				**out = **in
-			}
-		}
-	}
-	if in.UsersRef != nil {
-		in, out := &in.UsersRef, &out.UsersRef
+	if in.HashAlgorithm != nil {
+		in, out := &in.HashAlgorithm, &out.HashAlgorithm
 		*out = new(string)
 		**out = **in
 	}
-	if in.Groups != nil {
-		in, out := &in.Groups, &out.Groups
-		*out = make([]*string, len(*in))
-		for i := range *in {
-			if (*in)[i] != nil {
-				in, out := &(*in)[i], &(*out)[i]
-				*out = new(string)
-				**out = **in
-			}
-		}
-	}
-	if in.GroupsRef != nil {
-		in, out := &in.GroupsRef, &out.GroupsRef
+	if in.ApprovalField != nil {
+		in, out := &in.ApprovalField, &out.ApprovalField
 		*out = new(string)
 		**out = **in
 	}
-	if in.Group != nil {
-		in, out := &in.Group, &out.Group
+	if in.OldHashField != nil {
+		in, out := &in.OldHashField, &out.OldHashField
 		*out = new(string)
 		**out = **in
 	}
-	if in.GroupRef != nil {
-		in, out := &in.GroupRef, &out.GroupRef
+	if in.NewHashField != nil {
+		in, out := &in.NewHashField, &out.NewHashField
 		*out = new(string)
 		**out = **in
 	}
-	if in.ServicePrincipals != nil {
-		in, out := &in.ServicePrincipals, &out.ServicePrincipals
-		*out = make([]*string, len(*in))
-		for i := range *in {
-			if (*in)[i] != nil {
-				in, out := &(*in)[i], &(*out)[i]
-				*out = new(string)
-				**out = **in
-			}
-		}
-	}
-	if in.ServicePrincipalsRef != nil {
-		in, out := &in.ServicePrincipalsRef, &out.ServicePrincipalsRef
+	if in.PauseAnnotation != nil {
+		in, out := &in.PauseAnnotation, &out.PauseAnnotation
 		*out = new(string)
 		**out = **in
 	}
-	if in.SkipQueryWhenTargetHasData != nil {
-		in, out := &in.SkipQueryWhenTargetHasData, &out.SkipQueryWhenTargetHasData
+	if in.DetailedCondition != nil {
+		in, out := &in.DetailedCondition, &out.DetailedCondition
 		*out = new(bool)
+		**out = **in
+	}
+	if in.ApprovalMessage != nil {
+		in, out := &in.ApprovalMessage, &out.ApprovalMessage
+		*out = new(string)
 		**out = **in
 	}
 }

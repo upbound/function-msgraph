@@ -1,0 +1,86 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: inputs.approve.fn.crossplane.io
+spec:
+  group: approve.fn.crossplane.io
+  names:
+    categories:
+    - crossplane
+    kind: Input
+    listKind: InputList
+    plural: inputs
+    singular: input
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Input can be used to provide input to this Function.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          approvalField:
+            description: |-
+              ApprovalField defines the status field to check for the approval decision
+              Default is "status.approved"
+            type: string
+          approvalMessage:
+            description: |-
+              ApprovalMessage sets a message to display when approval is required
+              Default is "Changes detected. Approval required."
+            type: string
+          dataField:
+            description: |-
+              DataField defines the object field to hash and store for tracking changes
+              For example: "spec.resources"
+            type: string
+          detailedCondition:
+            description: |-
+              DetailedCondition adds a detailed condition about approval status
+              Default is true
+            type: boolean
+          hashAlgorithm:
+            description: |-
+              HashAlgorithm defines which hash algorithm to use for calculating hashes
+              Supported values: "md5", "sha256", "sha512"
+              Default is "sha256"
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          newHashField:
+            description: |-
+              NewHashField defines where to store the current hash value
+              Default is "status.newHash"
+            type: string
+          oldHashField:
+            description: |-
+              OldHashField defines where to store the previous (approved) hash value
+              Default is "status.oldHash"
+            type: string
+          pauseAnnotation:
+            description: |-
+              PauseAnnotation defines which annotation to use for pausing reconciliation
+              Default is "crossplane.io/paused"
+            type: string
+        required:
+        - dataField
+        type: object
+    served: true
+    storage: true

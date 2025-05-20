@@ -1,0 +1,43 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xapprovals.example.crossplane.io
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1
+    kind: XApproval
+  pipeline:
+  - step: require-approval
+    functionRef:
+      name: function-approve
+    input:
+      apiVersion: approve.fn.crossplane.io/v1alpha1
+      kind: Input
+      dataField: "spec.resources"
+      approvalField: "status.approved"
+      newHashField: "status.newHash"
+      oldHashField: "status.oldHash"
+      pauseAnnotation: "crossplane.io/paused"
+      detailedCondition: true
+      approvalMessage: "Changes detected. Administrative approval required."
+  - step: render-resources
+    functionRef:
+      name: function-patch-and-transform
+    input:
+      apiVersion: pt.fn.crossplane.io/v1alpha1
+      kind: Resources
+      resources:
+      - name: example-configmap
+        base:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: example-configmap
+          data:
+            key1: value1
+        patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.resources.data
+          toFieldPath: data
+          policy:
+            fromFieldPath: Required

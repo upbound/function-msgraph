@@ -1,95 +1,47 @@
 apiVersion: apiextensions.crossplane.io/v1
 kind: CompositeResourceDefinition
 metadata:
-  name: xrs.example.crossplane.io
+  name: xapprovals.example.crossplane.io
 spec:
   group: example.crossplane.io
   names:
     categories:
     - crossplane
-    kind: XR
-    plural: xrs
+    kind: XApproval
+    plural: xapprovals
   versions:
   - name: v1
     referenceable: true
     schema:
       openAPIV3Schema:
-        description: XR is the Schema for the XR API.
+        description: XApproval is the Schema for the XApproval API.
         properties:
           spec:
-            description: XRSpec defines the desired state of XR.
+            description: XApprovalSpec defines the desired state of XApproval.
             type: object
             properties:
-              queryResourceType:
-                description: resource type for az resource query construction
-                type: string
-              groupConfig:
-                description: Configuration for group references
+              resources:
+                description: Resources that require approval before provisioning
                 type: object
-                properties:
-                  name:
-                    description: Name of a single group to reference with groupRef
-                    type: string
-                  names:
-                    description: List of group names to reference with groupsRef
-                    type: array
-                    items:
-                      type: string
-              userAccess:
-                description: Configuration for user references
-                type: object
-                properties:
-                  emails:
-                    description: List of user emails to reference with usersRef
-                    type: array
-                    items:
-                      type: string
-              servicePrincipalConfig:
-                description: Configuration for service principal references
-                type: object
-                properties:
-                  names:
-                    description: List of service principal names to reference with servicePrincipalsRef
-                    type: array
-                    items:
-                      type: string
+                x-kubernetes-preserve-unknown-fields: true
           status:
-            description: XRStatus defines the observed state of XR.
+            description: XApprovalStatus defines the observed state of XApproval.
             type: object
             properties:
-              groupMembers:
-                description: Freeform field containing query results from function-msgraph
-                type: array
-                items:
-                  type: object
-                x-kubernetes-preserve-unknown-fields: true
-              validatedUsers:
-                description: Freeform field containing query results from function-msgraph
-                type: array
-                items:
-                  type: object
-                x-kubernetes-preserve-unknown-fields: true
-              groupObjectIDs:
-                description: Freeform field containing query results from function-msgraph
-                type: array
-                items:
-                  type: object
-                x-kubernetes-preserve-unknown-fields: true
-              servicePrincipals:
-                description: Freeform field containing query results from function-msgraph
-                type: array
-                items:
-                  type: object
+              approved:
+                description: Whether the current changes are approved
+                type: boolean
+              oldHash:
+                description: Hash of previously approved resource state
+                type: string
+              newHash:
+                description: Hash of current resource state
+                type: string
+              resourceStatus:
+                description: Status of the underlying resources
+                type: object
                 x-kubernetes-preserve-unknown-fields: true
         required:
         - spec
         type: object
     served: true
-status:
-  controllers:
-    compositeResourceClaimType:
-      apiVersion: ""
-      kind: ""
-    compositeResourceType:
-      apiVersion: ""
-      kind: ""

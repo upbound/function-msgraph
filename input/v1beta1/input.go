@@ -1,6 +1,6 @@
 // Package v1beta1 contains the input type for this Function
 // +kubebuilder:object:generate=true
-// +groupName=msgraph.fn.crossplane.io
+// +groupName=approve.fn.crossplane.io
 // +versionName=v1alpha1
 package v1beta1
 
@@ -19,51 +19,43 @@ type Input struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// QueryType defines the type of Microsoft Graph API query to perform
-	// Supported values: UserValidation, GroupMembership, GroupObjectIDs, ServicePrincipalDetails
-	QueryType string `json:"queryType"`
+	// DataField defines the object field to hash and store for tracking changes
+	// For example: "spec.resources"
+	DataField string `json:"dataField"`
 
-	// Users is a list of userPrincipalName (email IDs) for user validation
+	// HashAlgorithm defines which hash algorithm to use for calculating hashes
+	// Supported values: "md5", "sha256", "sha512"
+	// Default is "sha256"
 	// +optional
-	Users []*string `json:"users,omitempty"`
+	HashAlgorithm *string `json:"hashAlgorithm,omitempty"`
 
-	// UsersRef is a reference to retrieve the user names (e.g., from status or context)
-	// Overrides Users field if used
+	// ApprovalField defines the status field to check for the approval decision
+	// Default is "status.approved"
 	// +optional
-	UsersRef *string `json:"usersRef,omitempty"`
+	ApprovalField *string `json:"approvalField,omitempty"`
 
-	// Groups is a list of group names for group object ID queries
+	// OldHashField defines where to store the previous (approved) hash value
+	// Default is "status.oldHash"
 	// +optional
-	Groups []*string `json:"groups,omitempty"`
+	OldHashField *string `json:"oldHashField,omitempty"`
 
-	// GroupsRef is a reference to retrieve the group names (e.g., from status or context)
-	// Overrides Groups field if used
+	// NewHashField defines where to store the current hash value
+	// Default is "status.newHash"
 	// +optional
-	GroupsRef *string `json:"groupsRef,omitempty"`
+	NewHashField *string `json:"newHashField,omitempty"`
 
-	// Group is a single group name for group membership queries
+	// PauseAnnotation defines which annotation to use for pausing reconciliation
+	// Default is "crossplane.io/paused"
 	// +optional
-	Group *string `json:"group,omitempty"`
+	PauseAnnotation *string `json:"pauseAnnotation,omitempty"`
 
-	// GroupRef is a reference to retrieve the group name (e.g., from status or context)
-	// Overrides Group field if used
+	// DetailedCondition adds a detailed condition about approval status
+	// Default is true 
 	// +optional
-	GroupRef *string `json:"groupRef,omitempty"`
+	DetailedCondition *bool `json:"detailedCondition,omitempty"`
 
-	// ServicePrincipals is a list of service principal names
+	// ApprovalMessage sets a message to display when approval is required
+	// Default is "Changes detected. Approval required."
 	// +optional
-	ServicePrincipals []*string `json:"servicePrincipals,omitempty"`
-
-	// ServicePrincipalsRef is a reference to retrieve the service principal names (e.g., from status or context)
-	// Overrides ServicePrincipals field if used
-	// +optional
-	ServicePrincipalsRef *string `json:"servicePrincipalsRef,omitempty"`
-
-	// Target where to store the Query Result
-	Target string `json:"target"`
-
-	// SkipQueryWhenTargetHasData controls whether to skip the query when the target already has data
-	// Default is false to ensure continuous reconciliation
-	// +optional
-	SkipQueryWhenTargetHasData *bool `json:"skipQueryWhenTargetHasData,omitempty"`
+	ApprovalMessage *string `json:"approvalMessage,omitempty"`
 }

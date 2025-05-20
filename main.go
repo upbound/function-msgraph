@@ -1,4 +1,4 @@
-// Package main implements a Composition Function for Microsoft Graph API.
+// Package main implements a Composition Function for manual approval in Crossplane.
 package main
 
 import (
@@ -26,8 +26,7 @@ func (c *CLI) Run() error {
 	}
 
 	return function.Serve(&Function{
-		log:        log,
-		graphQuery: &GraphQuery{},
+		log: log,
 	},
 		function.Listen(c.Network, c.Address),
 		function.MTLSCertificates(c.TLSCertsDir),
@@ -36,6 +35,6 @@ func (c *CLI) Run() error {
 }
 
 func main() {
-	ctx := kong.Parse(&CLI{}, kong.Description("A Crossplane Composition Function for Microsoft Graph API queries."))
+	ctx := kong.Parse(&CLI{}, kong.Description("A Crossplane Composition Function for manual approval workflow."))
 	ctx.FatalIfErrorf(ctx.Run())
 }
