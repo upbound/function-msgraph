@@ -14,7 +14,7 @@ require (
 	github.com/microsoftgraph/msgraph-sdk-go v1.84.0
 	google.golang.org/protobuf v1.36.8
 	k8s.io/apimachinery v0.33.4
-	k8s.io/utils v0.0.0-20241104100929-3ea5e8cea738
+	k8s.io/utils v0.0.0-20250820121507-0af2bda4dd1d
 	sigs.k8s.io/controller-tools v0.18.0
 )
 
