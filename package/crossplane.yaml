@@ -1,5 +1,5 @@
 ---
-apiVersion: meta.pkg.crossplane.io/v1beta1
+apiVersion: meta.pkg.crossplane.io/v1
 kind: Function
 metadata:
   name: function-msgraph
@@ -13,4 +13,7 @@ metadata:
       to validate Azure AD users, get group memberships, group object IDs, and service principal details.
 
       The secret for Azure credentials is compatible with the [Official Azure Provider](https://marketplace.upbound.io/providers/upbound/provider-family-azure/latest).
-spec: {}
+spec:
+  capabilities:
+  - composition
+  - operation

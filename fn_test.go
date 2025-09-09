@@ -27,6 +27,12 @@ func (m *MockGraphQuery) graphQuery(ctx context.Context, azureCreds map[string]s
 	return m.GraphQueryFunc(ctx, azureCreds, in)
 }
 
+type MockTimer struct{}
+
+func (MockTimer) now() string {
+	return "2025-01-01T00:00:00+01:00"
+}
+
 // TestResolveGroupsRef tests the functionality of resolving groupsRef from context, status, or spec
 func TestResolveGroupsRef(t *testing.T) {
 	var (
@@ -1622,7 +1628,7 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 func TestRunFunction(t *testing.T) {
 
 	var (
-		xr    = `{"apiVersion":"example.org/v1","kind":"XR","metadata":{"name":"cool-xr"},"spec":{"count":2}}`
+		xr    = `{"apiVersion":"example.org/v1","kind":"XR","metadata":{"name":"cool-xr","finalizers":["composite.apiextensions.crossplane.io"]},"spec":{"count":2}}`
 		creds = &fnv1.CredentialData{
 			Data: map[string][]byte{
 				"credentials": []byte(`{
@@ -1660,6 +1666,11 @@ func TestRunFunction(t *testing.T) {
 						"queryType": "UserValidation",
 						"users": ["user@example.com"]
 					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
 				},
 			},
 			want: want{
@@ -1675,8 +1686,14 @@ func TestRunFunction(t *testing.T) {
 					Desired: &fnv1.State{
 						Composite: &fnv1.Resource{
 							Resource: resource.MustStructJSON(`{
-								"apiVersion": "",
-								"kind": ""
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"metadata": {
+									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
+								}
 							}`),
 						},
 					},
@@ -1694,6 +1711,11 @@ func TestRunFunction(t *testing.T) {
 						"queryType": "UserValidation",
 						"users": ["user@example.com"]
 					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
 					Credentials: map[string]*fnv1.Credentials{
 						"azure-creds": {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
@@ -1714,8 +1736,14 @@ func TestRunFunction(t *testing.T) {
 					Desired: &fnv1.State{
 						Composite: &fnv1.Resource{
 							Resource: resource.MustStructJSON(`{
-								"apiVersion": "",
-								"kind": ""
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"metadata": {
+									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
+								}
 							}`),
 						},
 					},
@@ -2413,6 +2441,476 @@ func TestRunFunction(t *testing.T) {
 				},
 			},
 		},
+		"OperationWithoutWatchedResource": {
+			reason: "The Function should return fatal if it runs as operation without a watched resource",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"users": ["user@example.com"],
+						"target": "context.validatedUsers"
+					}`),
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+					RequiredResources: map[string]*fnv1.Resources{},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  `operation: no resource to process with name ops.crossplane.io/watched-resource`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+				},
+			},
+		},
+		"OperationWithLessThanOneWatchedResource": {
+			reason: "The Function should return fatal if it runs as operation with less than one watched resource",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"users": ["user@example.com"],
+						"target": "context.validatedUsers"
+					}`),
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+					RequiredResources: map[string]*fnv1.Resources{
+						"ops.crossplane.io/watched-resource": {
+							Items: nil,
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  `operation: incorrect number of resources sent to the function. expected 1, got 0`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+				},
+			},
+		},
+		"OperationWithMoreThanOneWatchedResource": {
+			reason: "The Function should return fatal if it runs as operation with more than one watched resource",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"users": ["user@example.com"],
+						"target": "context.validatedUsers"
+					}`),
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+					RequiredResources: map[string]*fnv1.Resources{
+						"ops.crossplane.io/watched-resource": {
+							Items: []*fnv1.Resource{
+								{
+									Resource: resource.MustStructJSON(xr),
+								},
+								{
+									Resource: resource.MustStructJSON(xr),
+								},
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  `operation: incorrect number of resources sent to the function. expected 1, got 2`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+				},
+			},
+		},
+		"OperationWithNilObjectInWatchedResource": {
+			reason: "The Function should return fatal if it runs as operation watched resource with zero length Resource.Object",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"users": ["user@example.com"],
+						"target": "context.validatedUsers"
+					}`),
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+					RequiredResources: map[string]*fnv1.Resources{
+						"ops.crossplane.io/watched-resource": {
+							Items: []*fnv1.Resource{
+								{},
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  `operation: Resource.Object property in operation resource can not be empty`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+				},
+			},
+		},
+		"OperationWithWatchedResourceWhichIsNotXR": {
+			reason: "The Function should only allow operations on XRs based on finalizers",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"users": ["user@example.com"],
+						"target": "status.validatedUsers"
+					}`),
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+					RequiredResources: map[string]*fnv1.Resources{
+						"ops.crossplane.io/watched-resource": {
+							Items: []*fnv1.Resource{
+								{
+									Resource: resource.MustStructJSON(`{"apiVersion":"example.org/v1","kind":"XR","metadata":{"name":"cool-xr"},"spec":{"count":2}}`),
+								},
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  "operation: function-msgraph support only operations on composite resources",
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+				},
+			},
+		},
+		"OperationWithWatchedResourceQueryNoDrift": {
+			reason: "The Function should set annotations on XR that notify user about lack of drift in query results",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"users": ["user@example.com"],
+						"target": "status.validatedUsers"
+					}`),
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+					RequiredResources: map[string]*fnv1.Resources{
+						"ops.crossplane.io/watched-resource": {
+							Items: []*fnv1.Resource{
+								{
+									Resource: resource.MustStructJSON(`{
+										"apiVersion": "example.org/v1",
+										"kind": "XR",
+										"metadata": {
+											"name": "cool-xr",
+											"finalizers": [
+												"composite.apiextensions.crossplane.io"
+											]
+										},
+										"spec": {
+											"count": 2
+										},
+										"status": {
+											"validatedUsers": [
+												{
+													"id": "test-user-id",
+													"displayName": "Test User",
+													"userPrincipalName": "user@example.com",
+													"mail": "user@example.com"
+												}
+											]
+										}
+									}`),
+								},
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "UserValidation"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Resources: map[string]*fnv1.Resource{
+							"xr": {
+								Resource: resource.MustStructJSON(`{
+									"apiVersion": "example.org/v1",
+									"kind": "XR",
+									"metadata": {
+										"name": "cool-xr",
+										"annotations": {
+											"function-msgraph/last-execution": "2025-01-01T00:00:00+01:00",
+											"function-msgraph/last-execution-query-drift-detected": "false"
+										}
+									}
+								}`),
+							},
+						},
+					},
+				},
+			},
+		},
+		"OperationWithWatchedResourceQueryNoDriftWithExistingAnnotations": {
+			reason: "The Function should set annotations on XR that notify user about lack of drift in query results and in the same time not override existing annotations",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"users": ["user@example.com"],
+						"target": "status.validatedUsers"
+					}`),
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+					RequiredResources: map[string]*fnv1.Resources{
+						"ops.crossplane.io/watched-resource": {
+							Items: []*fnv1.Resource{
+								{
+									Resource: resource.MustStructJSON(`{
+										"apiVersion": "example.org/v1",
+										"kind": "XR",
+										"metadata": {
+											"name": "cool-xr",
+											"finalizers": [
+												"composite.apiextensions.crossplane.io"
+											],
+											"annotations": {
+												"my-cool-annotation": "love-msgraph"
+											}
+										},
+										"spec": {
+											"count": 2
+										},
+										"status": {
+											"validatedUsers": [
+												{
+													"id": "test-user-id",
+													"displayName": "Test User",
+													"userPrincipalName": "user@example.com",
+													"mail": "user@example.com"
+												}
+											]
+										}
+									}`),
+								},
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "UserValidation"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Resources: map[string]*fnv1.Resource{
+							"xr": {
+								Resource: resource.MustStructJSON(`{
+									"apiVersion": "example.org/v1",
+									"kind": "XR",
+									"metadata": {
+										"name": "cool-xr",
+										"annotations": {
+											"function-msgraph/last-execution": "2025-01-01T00:00:00+01:00",
+											"function-msgraph/last-execution-query-drift-detected": "false",
+											"my-cool-annotation": "love-msgraph"
+										}
+									}
+								}`),
+							},
+						},
+					},
+				},
+			},
+		},
+		"OperationWithWatchedResourceQueryDrift": {
+			reason: "The Function should set annotations on XR that notify user about drift in query results",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"users": ["user@example.com"],
+						"target": "status.validatedUsers"
+					}`),
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+					RequiredResources: map[string]*fnv1.Resources{
+						"ops.crossplane.io/watched-resource": {
+							Items: []*fnv1.Resource{
+								{
+									Resource: resource.MustStructJSON(`{
+										"apiVersion": "example.org/v1",
+										"kind": "XR",
+										"metadata": {
+											"name": "cool-xr",
+											"finalizers": [
+												"composite.apiextensions.crossplane.io"
+											]
+										},
+										"spec": {
+											"count": 2
+										},
+										"status": {
+											"validatedUsers": [
+												{
+													"id": "incorrect-id",
+													"displayName": "Another Display Name",
+													"userPrincipalName": "user@example.com",
+													"mail": "user@example.com"
+												}
+											]
+										}
+									}`),
+								},
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "UserValidation"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Resources: map[string]*fnv1.Resource{
+							"xr": {
+								Resource: resource.MustStructJSON(`{
+									"apiVersion": "example.org/v1",
+									"kind": "XR",
+									"metadata": {
+										"name": "cool-xr",
+										"annotations": {
+											"function-msgraph/last-execution": "2025-01-01T00:00:00+01:00",
+											"function-msgraph/last-execution-query-drift-detected": "true"
+										}
+									}
+								}`),
+							},
+						},
+					},
+				},
+			},
+		},
 	}
 
 	for name, tc := range cases {
@@ -2488,6 +2986,7 @@ func TestRunFunction(t *testing.T) {
 
 			f := &Function{
 				graphQuery: mockQuery,
+				timer:      &MockTimer{},
 				log:        logging.NewNopLogger(),
 			}
 			rsp, err := f.RunFunction(tc.args.ctx, tc.args.req)
@@ -2704,6 +3203,7 @@ func TestIdentityType(t *testing.T) {
 
 			f := &Function{
 				graphQuery: mockQuery,
+				timer:      &MockTimer{},
 				log:        logging.NewNopLogger(),
 			}
 			rsp, err := f.RunFunction(tc.args.ctx, tc.args.req)

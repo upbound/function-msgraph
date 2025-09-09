@@ -1,0 +1,34 @@
+apiVersion: ops.crossplane.io/v1alpha1
+kind: WatchOperation
+metadata:
+  name: update-user-validation-for-critical-xrs
+spec:
+  watch:
+    apiVersion: example.crossplane.io/v1
+    kind: XR
+    matchLabels:
+      always-update: "true"
+  concurrencyPolicy: Allow
+  operationTemplate:
+    spec:
+      mode: Pipeline
+      pipeline:
+      - step: user-validation
+        functionRef:
+          name: function-msgraph
+        input:
+          apiVersion: msgraph.fn.crossplane.io/v1alpha1
+          kind: Input
+          queryType: UserValidation
+          # Replace these with actual users in your directory
+          users:
+            - "admin@example.onmicrosoft.com"
+            - "user@example.onmicrosoft.com"
+            - "yury@upbound.io"
+          target: "status.validatedUsers"
+        credentials:
+          - name: azure-creds
+            source: Secret
+            secretRef:
+              namespace: upbound-system
+              name: azure-account-creds

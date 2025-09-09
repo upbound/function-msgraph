@@ -365,6 +365,125 @@ identity:
   type: AzureWorkloadIdentityCredentials
 ```
 
+## Operations support
+function-msgraph support every kind of [operations](https://docs.crossplane.io/latest/operations/operation/) but it only allows targeting Composite Resources
+Function omits the input.skipQueryWhenTargetHasData parameter when running in operation mode to enforce compability with Cron/Watch modes.
+CronOperations and WatchOperations are the most useful in context of graph queries, please check [examples](./example/operations/).
+### Operations and Compositions Working Together
+
+**Important**: Operations and Compositions work in conjunction to provide a self-healing mechanism:
+
+1. **Operations Role (Drift Detection)**:
+   - Query Microsoft Graph API on schedule/watch events
+   - Compare results with current XR status
+   - Set drift detection annotations (but don't update status directly)
+
+2. **Compositions Role (Drift Correction)**:
+   - Run when XR is reconciled (triggered by annotation changes)
+   - Check drift detection annotation
+   - If drift detected, ignore `skipQueryWhenTargetHasData` flag and update status
+   - Reset drift annotation to "false" after successful update
+
+This creates a **two-phase self-healing system** where Operations monitor for changes and Compositions perform the actual data updates.
+### Operations results
+function-msgraph operations result in two annotations set on the XR:
+```yaml
+apiVersion: "example.org/v1"
+kind: XR
+metadata:
+  name: "cool-xr"
+  annotations:
+    "function-msgraph/last-execution": "2025-01-01T00:00:00+01:00"
+    "function-msgraph/last-execution-query-drift-detected": "false"
+```
+function-msgraph/last-execution sets RFC3339 timestamp informing about last succesful Operation run.
+function-msgraph/last-execution-query-drift-detected sets a boolean if there's a drift between input.target field's value and query result, which is used by function-msgraph in Composition context for self-healing. skipQueryWhenTargetHasData input parameter is ommited when drift detected annotation is set which leads to XR update and after that next Operation run sets the annotation back to "false".
+
+### CronOperation
+CronOperation may be used to forcefully update XR's status in a predefined interval.
+That functionality may be especially useful for XRs that are business critical and should have the data refreshed without worrying about throttling.
+Supports only singular resource reference.
+
+```yaml
+apiVersion: ops.crossplane.io/v1alpha1
+kind: CronOperation
+metadata:
+  name: update-user-validation-for-critical-xr
+spec:
+  schedule: "*/5 * * * *" # Every 5 minutes
+  concurrencyPolicy: Forbid
+  successfulHistoryLimit: 5
+  failedHistoryLimit: 3
+  operationTemplate:
+    spec:
+      mode: Pipeline
+      pipeline:
+      - step: user-validation
+        functionRef:
+          name: function-msgraph
+        input:
+          apiVersion: msgraph.fn.crossplane.io/v1alpha1
+          kind: Input
+          queryType: UserValidation
+          # Replace these with actual users in your directory
+          users:
+            - "admin@example.onmicrosoft.com"
+            - "user@example.onmicrosoft.com"
+            - "yury@upbound.io"
+          target: "status.validatedUsers"
+        credentials:
+          - name: azure-creds
+            source: Secret
+            secretRef:
+              namespace: upbound-system
+              name: azure-account-creds
+        requirements:
+          requiredResources:
+          - requirementName: ops.crossplane.io/watched-resource
+            apiVersion: example.crossplane.io/v1
+            kind: XR
+            name: business-critical-xr
+```
+### WatchOperation
+WatchOperation may be used to forcefully update XR's status based on match condition.
+For example it may be useful to refresh status in business critical XR's that are labeled with label `always-update: "true"`.
+```yaml
+apiVersion: ops.crossplane.io/v1alpha1
+kind: WatchOperation
+metadata:
+  name: update-user-validation-for-critical-xrs
+spec:
+  watch:
+    apiVersion: example.crossplane.io/v1
+    kind: XR
+    matchLabels:
+      always-update: "true"
+  concurrencyPolicy: Allow
+  operationTemplate:
+    spec:
+      mode: Pipeline
+      pipeline:
+      - step: user-validation
+        functionRef:
+          name: function-msgraph
+        input:
+          apiVersion: msgraph.fn.crossplane.io/v1alpha1
+          kind: Input
+          queryType: UserValidation
+          # Replace these with actual users in your directory
+          users:
+            - "admin@example.onmicrosoft.com"
+            - "user@example.onmicrosoft.com"
+            - "yury@upbound.io"
+          target: "status.validatedUsers"
+        credentials:
+          - name: azure-creds
+            source: Secret
+            secretRef:
+              namespace: upbound-system
+              name: azure-account-creds
+```
+
 ## References
 
 - [Microsoft Graph API Overview](https://learn.microsoft.com/en-us/graph/api/overview?view=graph-rest-1.0)

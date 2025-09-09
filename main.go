@@ -28,6 +28,7 @@ func (c *CLI) Run() error {
 	return function.Serve(&Function{
 		log:        log,
 		graphQuery: &GraphQuery{},
+		timer:      &Timer{},
 	},
 		function.Listen(c.Network, c.Address),
 		function.MTLSCertificates(c.TLSCertsDir),
