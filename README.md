@@ -339,6 +339,60 @@ servicePrincipalsRef: "spec.servicePrincipalConfig.names"  # Get service princip
 target: "status.servicePrincipals"
 ```
 
+## Using data from EnvironmentConfig
+
+To use data from a Crossplane `EnvironmentConfig`, first load the data into the context using [function-environment-configs](https://github.com/crossplane-contrib/function-environment-configs). This function should be in the pipeline before you use function-msgraph.
+
+function-environment-configs loads a merged map of environment config data to `context["apiextensions.crossplane.io/environment"]` but to refer to this correctly in function-msgraph the following syntax must be used: `context.[apiextensions.crossplane.io/environment]`.
+
+### Example:
+
+1. First, define your Environment Config:
+
+```yaml
+apiVersion: apiextensions.crossplane.io/v1beta1
+kind: EnvironmentConfig
+metadata:
+  name: example-config
+data:
+  entraid:
+    users:
+      - user@example.com
+```
+
+2. Load the Environment Config in to your composition pipeline:
+
+```yaml
+  pipeline:
+    - step: load-environment-config
+      functionRef:
+        name: crossplane-contrib-function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - type: Reference
+              ref:
+                name: example-config
+```
+
+3. Reference the Environment Config data in your function input:
+
+```yaml
+    - step: load-environment-config
+      # ... omitted for brevity
+    - step: get-group-members
+      functionRef:
+        name: function-msgraph
+      input:
+        apiVersion: msgraph.fn.crossplane.io/v1alpha1
+        kind: Input
+        queryType: GroupMembership
+        groupRef: context.[apiextensions.crossplane.io/environment].entraid.users
+        target: "status.users"
+```
+
 ## Using Different Credentials
 
 ### Using ServicePrincipal credentials
