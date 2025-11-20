@@ -501,7 +501,7 @@ func (g *GraphQuery) validateUsers(ctx context.Context, client *msgraphsdk.Graph
 		return nil, errors.New("no users provided for validation")
 	}
 
-	var results []interface{}
+	results := make([]interface{}, 0)
 
 	for _, userPrincipalName := range in.Users {
 		if userPrincipalName == nil {
@@ -758,7 +758,7 @@ func (g *GraphQuery) getGroupObjectIDs(ctx context.Context, client *msgraphsdk.G
 		return nil, errors.New("no group names provided")
 	}
 
-	var results []interface{}
+	results := make([]interface{}, 0)
 
 	for _, groupName := range in.Groups {
 		if groupName == nil {
@@ -803,7 +803,7 @@ func (g *GraphQuery) getServicePrincipalDetails(ctx context.Context, client *msg
 		return nil, errors.New("no service principal names provided")
 	}
 
-	var results []interface{}
+	results := make([]interface{}, 0)
 
 	for _, spName := range in.ServicePrincipals {
 		if spName == nil {

@@ -69,7 +69,7 @@ type Input struct {
 
 	// FailOnEmpty controls whether the function should fail when input lists are empty.
 	// If true, the function will error on empty input lists.
-	// If false or unset, empty lists are valid and will result in a no-op.
+	// If false or unset, empty lists are valid and will result in an empty list at the target.
 	// +optional
 	FailOnEmpty *bool `json:"failOnEmpty,omitempty"`
 
