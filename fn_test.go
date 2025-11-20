@@ -311,7 +311,7 @@ func TestResolveGroupsRef(t *testing.T) {
 				},
 			},
 		},
-		"GroupsRefEmpty": {
+		"GroupsRefEmptyDefault": {
 			reason: "The Function should resolve groupsRef from XR spec",
 			args: args{
 				ctx: context.Background(),
@@ -374,6 +374,136 @@ func TestResolveGroupsRef(t *testing.T) {
 								},
 								"status": {
 									"groupObjectIDs": []
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"GroupsRefEmptyNoFail": {
+			reason: "The Function should resolve groupsRef from XR spec",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "GroupObjectIDs",
+						"groupsRef": "spec.groupConfig.groupNames",
+						"target": "status.groupObjectIDs",
+						"failOnEmpty": false
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"spec": {
+									"groupConfig": {
+										"groupNames": []
+									}
+								}
+							}`),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "GroupObjectIDs"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"spec": {
+									"groupConfig": {
+										"groupNames": []
+									}
+								},
+								"status": {
+									"groupObjectIDs": []
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"GroupsRefEmptyFail": {
+			reason: "The Function should resolve groupsRef from XR spec",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "GroupObjectIDs",
+						"groupsRef": "spec.groupConfig.groupNames",
+						"target": "status.groupObjectIDs",
+						"failOnEmpty": true
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"spec": {
+									"groupConfig": {
+										"groupNames": []
+									}
+								}
+							}`),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta:       &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  "no group names provided",
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"spec": {
+									"groupConfig": {
+										"groupNames": []
+									}
 								}}`),
 						},
 					},
@@ -1158,7 +1288,7 @@ func TestResolveUsersRef(t *testing.T) {
 				},
 			},
 		},
-		"UsersRefEmpty": {
+		"UsersRefEmptyDefault": {
 			reason: "The Function should resolve usersRef from XR spec",
 			args: args{
 				ctx: context.Background(),
@@ -1221,6 +1351,136 @@ func TestResolveUsersRef(t *testing.T) {
 								},
 								"status": {
 									"validatedUsers": []
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"UsersRefEmptyNoFail": {
+			reason: "The Function should resolve usersRef from XR spec",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"usersRef": "spec.userAccess.emails",
+						"target": "status.validatedUsers",
+						"failOnEmpty": false
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"spec": {
+									"userAccess": {
+										"emails": []
+									}
+								}
+							}`),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "UserValidation"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"spec": {
+									"userAccess": {
+										"emails": []
+									}
+								},
+								"status": {
+									"validatedUsers": []
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"UsersRefEmptyFail": {
+			reason: "The Function should resolve usersRef from XR spec",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"usersRef": "spec.userAccess.emails",
+						"target": "status.validatedUsers",
+						"failOnEmpty": true
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"spec": {
+									"userAccess": {
+										"emails": []
+									}
+								}
+							}`),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta:       &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  "no users provided for validation",
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"spec": {
+									"userAccess": {
+										"emails": []
+									}
 								}}`),
 						},
 					},
@@ -1636,7 +1896,7 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 				},
 			},
 		},
-		"ServicePrincipalsRefEmpty": {
+		"ServicePrincipalsRefEmptyDefault": {
 			reason: "The Function should resolve servicePrincipalsRef from XR spec",
 			args: args{
 				ctx: context.Background(),
@@ -1699,6 +1959,136 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 								},
 								"status": {
 									"servicePrincipals": []
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"ServicePrincipalsRefEmptyNoFail": {
+			reason: "The Function should resolve servicePrincipalsRef from XR spec",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "ServicePrincipalDetails",
+						"servicePrincipalsRef": "spec.servicePrincipalConfig.names",
+						"target": "status.servicePrincipals",
+						"failOnEmpty": false
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"spec": {
+									"servicePrincipalConfig": {
+										"names": []
+									}
+								}
+							}`),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "ServicePrincipalDetails"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"spec": {
+									"servicePrincipalConfig": {
+										"names": []
+									}
+								},
+								"status": {
+									"servicePrincipals": []
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"ServicePrincipalsRefEmptyFail": {
+			reason: "The Function should resolve servicePrincipalsRef from XR spec",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "ServicePrincipalDetails",
+						"servicePrincipalsRef": "spec.servicePrincipalConfig.names",
+						"target": "status.servicePrincipals",
+						"failOnEmpty": true
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"spec": {
+									"servicePrincipalConfig": {
+										"names": []
+									}
+								}
+							}`),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta:       &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  "no service principal names provided",
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"spec": {
+									"servicePrincipalConfig": {
+										"names": []
+									}
 								}}`),
 						},
 					},
