@@ -67,6 +67,12 @@ type Input struct {
 	// +optional
 	SkipQueryWhenTargetHasData *bool `json:"skipQueryWhenTargetHasData,omitempty"`
 
+	// FailOnEmpty controls whether the function should fail when input lists are empty.
+	// If true, the function will error on empty input lists.
+	// If false or unset, empty lists are valid and will result in an empty list at the target.
+	// +optional
+	FailOnEmpty *bool `json:"failOnEmpty,omitempty"`
+
 	// Identity defines the type of identity used for authentication to the Microsoft Graph API.
 	Identity *Identity `json:"identity,omitempty"`
 }

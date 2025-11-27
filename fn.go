@@ -497,11 +497,11 @@ func (g *GraphQuery) graphQuery(ctx context.Context, azureCreds map[string]strin
 
 // validateUsers validates if the provided user principal names (emails) exist
 func (g *GraphQuery) validateUsers(ctx context.Context, client *msgraphsdk.GraphServiceClient, in *v1beta1.Input) (interface{}, error) {
-	if len(in.Users) == 0 {
+	if in.FailOnEmpty != nil && *in.FailOnEmpty && len(in.Users) == 0 {
 		return nil, errors.New("no users provided for validation")
 	}
 
-	var results []interface{}
+	results := make([]interface{}, 0)
 
 	for _, userPrincipalName := range in.Users {
 		if userPrincipalName == nil {
@@ -754,11 +754,11 @@ func (g *GraphQuery) getGroupMembers(ctx context.Context, client *msgraphsdk.Gra
 
 // getGroupObjectIDs retrieves object IDs for the specified group names
 func (g *GraphQuery) getGroupObjectIDs(ctx context.Context, client *msgraphsdk.GraphServiceClient, in *v1beta1.Input) (interface{}, error) {
-	if len(in.Groups) == 0 {
+	if in.FailOnEmpty != nil && *in.FailOnEmpty && len(in.Groups) == 0 {
 		return nil, errors.New("no group names provided")
 	}
 
-	var results []interface{}
+	results := make([]interface{}, 0)
 
 	for _, groupName := range in.Groups {
 		if groupName == nil {
@@ -799,11 +799,11 @@ func (g *GraphQuery) getGroupObjectIDs(ctx context.Context, client *msgraphsdk.G
 
 // getServicePrincipalDetails retrieves details about service principals by name
 func (g *GraphQuery) getServicePrincipalDetails(ctx context.Context, client *msgraphsdk.GraphServiceClient, in *v1beta1.Input) (interface{}, error) {
-	if len(in.ServicePrincipals) == 0 {
+	if in.FailOnEmpty != nil && *in.FailOnEmpty && len(in.ServicePrincipals) == 0 {
 		return nil, errors.New("no service principal names provided")
 	}
 
-	var results []interface{}
+	results := make([]interface{}, 0)
 
 	for _, spName := range in.ServicePrincipals {
 		if spName == nil {
@@ -1515,10 +1515,8 @@ func (f *Function) extractStringArrayFromMap(dataMap map[string]interface{}, fie
 				result = append(result, &strCopy)
 			}
 		}
-		if len(result) > 0 {
-			return result, nil
-		}
+		return result, nil
 	}
 
-	return nil, errors.Errorf("cannot resolve groupsRef: %s not a string array or empty", refKey)
+	return nil, errors.Errorf("cannot resolve groupsRef: %s not a string array", refKey)
 }
