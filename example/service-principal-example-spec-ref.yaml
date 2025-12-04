@@ -17,7 +17,7 @@ spec:
         queryType: ServicePrincipalDetails
         # Using spec reference to get service principal names
         servicePrincipalsRef: "spec.servicePrincipalConfig.names"
-        target: "status.servicePrincipalDetails"
+        target: "status.servicePrincipals"
         skipQueryWhenTargetHasData: true
       credentials:
         - name: azure-creds

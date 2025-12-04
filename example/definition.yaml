@@ -57,26 +57,48 @@ spec:
             description: XRStatus defines the observed state of XR.
             type: object
             properties:
+              group:
+                description: Single group for groupRef status references
+                type: object
+                properties:
+                  name:
+                    description: Group name for status.group.name references
+                    type: string
+              groups:
+                description: List of group names for groupsRef status references
+                type: array
+                items:
+                  type: string
+              users:
+                description: List of user emails for usersRef status references
+                type: array
+                items:
+                  type: string
+              servicePrincipalNames:
+                description: List of service principal names for servicePrincipalsRef status references
+                type: array
+                items:
+                  type: string
               groupMembers:
-                description: Freeform field containing query results from function-msgraph
+                description: GroupMembership msgraph query results
                 type: array
                 items:
                   type: object
                 x-kubernetes-preserve-unknown-fields: true
               validatedUsers:
-                description: Freeform field containing query results from function-msgraph
+                description: UserValidation msgraph query results
                 type: array
                 items:
                   type: object
                 x-kubernetes-preserve-unknown-fields: true
               groupObjectIDs:
-                description: Freeform field containing query results from function-msgraph
+                description: GroupObjectIDs msgraph query results
                 type: array
                 items:
                   type: object
                 x-kubernetes-preserve-unknown-fields: true
               servicePrincipals:
-                description: Freeform field containing query results from function-msgraph
+                description: ServicePrincipalDetails msgraph query results
                 type: array
                 items:
                   type: object
