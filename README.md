@@ -490,7 +490,7 @@ spec:
           - name: azure-creds
             source: Secret
             secretRef:
-              namespace: upbound-system
+              namespace: crossplane-system
               name: azure-account-creds
         requirements:
           requiredResources:
@@ -535,7 +535,7 @@ spec:
           - name: azure-creds
             source: Secret
             secretRef:
-              namespace: upbound-system
+              namespace: crossplane-system
               name: azure-account-creds
 ```
 
