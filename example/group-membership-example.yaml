@@ -30,5 +30,5 @@ spec:
         - name: azure-creds
           source: Secret
           secretRef:
-            namespace: upbound-system
+            namespace: crossplane-system
             name: azure-account-creds
