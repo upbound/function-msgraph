@@ -3829,6 +3829,18 @@ func newTestUser() models.DirectoryObjectable {
 	return user
 }
 
+// newTestUserWithoutMail builds a typed user directory object that has no mail
+// attribute set (a common Entra ID state where the account has a UPN but the
+// mail attribute is null).
+func newTestUserWithoutMail() models.DirectoryObjectable {
+	user := models.NewUser()
+	user.SetId(ptr.To("user-id-3"))
+	user.SetDisplayName(ptr.To("No Mail User"))
+	user.SetUserPrincipalName(ptr.To("nomail@example.com"))
+	// mail intentionally left unset.
+	return user
+}
+
 // newTestServicePrincipal builds a typed service principal directory object.
 func newTestServicePrincipal() models.DirectoryObjectable {
 	sp := models.NewServicePrincipal()
@@ -3869,6 +3881,16 @@ func TestProcessMember(t *testing.T) {
 				"type":              "user",
 				"mail":              "user1@example.com",
 				"userPrincipalName": "user1@example.com",
+			},
+		},
+		"TypedUserWithoutMailOmitsMail": {
+			reason: "A typed user without a mail attribute should omit mail but still expose userPrincipalName",
+			member: newTestUserWithoutMail(),
+			want: map[string]interface{}{
+				"id":                "user-id-3",
+				"displayName":       "No Mail User",
+				"type":              "user",
+				"userPrincipalName": "nomail@example.com",
 			},
 		},
 		"TypedServicePrincipalIncludesAppID": {
