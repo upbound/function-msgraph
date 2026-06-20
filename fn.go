@@ -576,7 +576,10 @@ func (g *GraphQuery) fetchGroupMembers(ctx context.Context, client *msgraphsdk.G
 	// See: https://developer.microsoft.com/en-us/graph/known-issues/?search=25984
 	requestConfig := &groups.GroupItemRequestBuilderGetRequestConfiguration{
 		QueryParameters: &groups.GroupItemRequestBuilderGetQueryParameters{
-			Expand: []string{"members"},
+			// Explicitly select the standard member fields via a nested $select so
+			// that user properties such as mail and userPrincipalName are returned
+			// for the expanded members (see issue #115).
+			Expand: []string{"members($select=id,displayName,mail,userPrincipalName,appId)"},
 		},
 	}
 
@@ -639,24 +642,47 @@ func (g *GraphQuery) extractStringProperty(additionalData map[string]interface{}
 	return "", false
 }
 
-// extractUserProperties extracts user-specific properties from additionalData
-func (g *GraphQuery) extractUserProperties(additionalData map[string]interface{}, memberMap map[string]interface{}) {
-	// Extract mail property
-	if mail, ok := g.extractStringProperty(additionalData, "mail"); ok {
-		memberMap["mail"] = mail
+// extractUserProperties extracts user-specific properties.
+// Members expanded via $expand are deserialized into typed objects, so the
+// values live on the typed getters rather than in additionalData. We prefer
+// the typed getters and fall back to additionalData for plain DirectoryObjects.
+func (g *GraphQuery) extractUserProperties(member models.DirectoryObjectable, additionalData map[string]interface{}, memberMap map[string]interface{}) {
+	if user, ok := member.(models.Userable); ok {
+		if mail := ptr.Deref(user.GetMail(), ""); mail != "" {
+			memberMap["mail"] = mail
+		}
+		if upn := ptr.Deref(user.GetUserPrincipalName(), ""); upn != "" {
+			memberMap["userPrincipalName"] = upn
+		}
 	}
 
-	// Extract userPrincipalName property
-	if upn, ok := g.extractStringProperty(additionalData, "userPrincipalName"); ok {
-		memberMap["userPrincipalName"] = upn
+	// Fall back to additionalData when the typed getters did not provide a value.
+	if _, ok := memberMap["mail"]; !ok {
+		if mail, found := g.extractStringProperty(additionalData, "mail"); found {
+			memberMap["mail"] = mail
+		}
+	}
+	if _, ok := memberMap["userPrincipalName"]; !ok {
+		if upn, found := g.extractStringProperty(additionalData, "userPrincipalName"); found {
+			memberMap["userPrincipalName"] = upn
+		}
 	}
 }
 
-// extractServicePrincipalProperties extracts service principal specific properties
-func (g *GraphQuery) extractServicePrincipalProperties(additionalData map[string]interface{}, memberMap map[string]interface{}) {
-	// Extract appId property
-	if appID, ok := g.extractStringProperty(additionalData, "appId"); ok {
-		memberMap["appId"] = appID
+// extractServicePrincipalProperties extracts service principal specific properties.
+// As with users, prefer the typed getter and fall back to additionalData.
+func (g *GraphQuery) extractServicePrincipalProperties(member models.DirectoryObjectable, additionalData map[string]interface{}, memberMap map[string]interface{}) {
+	if sp, ok := member.(models.ServicePrincipalable); ok {
+		if appID := ptr.Deref(sp.GetAppId(), ""); appID != "" {
+			memberMap["appId"] = appID
+		}
+	}
+
+	// Fall back to additionalData when the typed getter did not provide a value.
+	if _, ok := memberMap["appId"]; !ok {
+		if appID, found := g.extractStringProperty(additionalData, "appId"); found {
+			memberMap["appId"] = appID
+		}
 	}
 }
 
@@ -710,9 +736,9 @@ func (g *GraphQuery) processMember(member models.DirectoryObjectable) map[string
 	// Extract type-specific properties
 	switch memberType {
 	case userType:
-		g.extractUserProperties(additionalData, memberMap)
+		g.extractUserProperties(member, additionalData, memberMap)
 	case servicePrincipalType:
-		g.extractServicePrincipalProperties(additionalData, memberMap)
+		g.extractServicePrincipalProperties(member, additionalData, memberMap)
 	}
 
 	return memberMap

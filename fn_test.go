@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/upbound/function-msgraph/input/v1beta1"
 	"google.golang.org/protobuf/testing/protocmp"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -3811,6 +3812,116 @@ func TestIdentityType(t *testing.T) {
 
 			if diff := cmp.Diff(tc.want.err, err, cmpopts.EquateErrors()); diff != "" {
 				t.Errorf("%s\nf.RunFunction(...): -want err, +got err:\n%s", tc.reason, diff)
+			}
+		})
+	}
+}
+
+// newTestUser builds a typed user directory object, mirroring how the Graph SDK
+// deserializes expanded group members (the values land on the typed struct, not
+// in additionalData).
+func newTestUser() models.DirectoryObjectable {
+	user := models.NewUser()
+	user.SetId(ptr.To("user-id-1"))
+	user.SetDisplayName(ptr.To("Test User 1"))
+	user.SetMail(ptr.To("user1@example.com"))
+	user.SetUserPrincipalName(ptr.To("user1@example.com"))
+	return user
+}
+
+// newTestUserWithoutMail builds a typed user directory object that has no mail
+// attribute set (a common Entra ID state where the account has a UPN but the
+// mail attribute is null).
+func newTestUserWithoutMail() models.DirectoryObjectable {
+	user := models.NewUser()
+	user.SetId(ptr.To("user-id-3"))
+	user.SetDisplayName(ptr.To("No Mail User"))
+	user.SetUserPrincipalName(ptr.To("nomail@example.com"))
+	// mail intentionally left unset.
+	return user
+}
+
+// newTestServicePrincipal builds a typed service principal directory object.
+func newTestServicePrincipal() models.DirectoryObjectable {
+	sp := models.NewServicePrincipal()
+	sp.SetId(ptr.To("sp-id-1"))
+	sp.SetDisplayName(ptr.To("Test Service Principal"))
+	sp.SetAppId(ptr.To("sp-app-id-1"))
+	return sp
+}
+
+// newTestDirectoryObject builds a plain directory object whose properties are
+// only available via additionalData, exercising the fallback extraction path.
+func newTestDirectoryObject() models.DirectoryObjectable {
+	do := models.NewDirectoryObject()
+	do.SetId(ptr.To("user-id-2"))
+	do.SetAdditionalData(map[string]interface{}{
+		"displayName":       "Fallback User",
+		"mail":              "user2@example.com",
+		"userPrincipalName": "user2@example.com",
+	})
+	return do
+}
+
+// TestProcessMember exercises the real member-extraction path (bypassed by the
+// mocked graphQuery in the RunFunction tests). It is the regression test for
+// issue #115: typed user members must expose mail and userPrincipalName.
+func TestProcessMember(t *testing.T) {
+	cases := map[string]struct {
+		reason string
+		member models.DirectoryObjectable
+		want   map[string]interface{}
+	}{
+		"TypedUserIncludesMailAndUPN": {
+			reason: "A typed user member should expose mail and userPrincipalName from the typed getters",
+			member: newTestUser(),
+			want: map[string]interface{}{
+				"id":                "user-id-1",
+				"displayName":       "Test User 1",
+				"type":              "user",
+				"mail":              "user1@example.com",
+				"userPrincipalName": "user1@example.com",
+			},
+		},
+		"TypedUserWithoutMailOmitsMail": {
+			reason: "A typed user without a mail attribute should omit mail but still expose userPrincipalName",
+			member: newTestUserWithoutMail(),
+			want: map[string]interface{}{
+				"id":                "user-id-3",
+				"displayName":       "No Mail User",
+				"type":              "user",
+				"userPrincipalName": "nomail@example.com",
+			},
+		},
+		"TypedServicePrincipalIncludesAppID": {
+			reason: "A typed service principal member should expose appId from the typed getter",
+			member: newTestServicePrincipal(),
+			want: map[string]interface{}{
+				"id":          "sp-id-1",
+				"displayName": "Test Service Principal",
+				"type":        "servicePrincipal",
+				"appId":       "sp-app-id-1",
+			},
+		},
+		"PlainDirectoryObjectUsesAdditionalDataFallback": {
+			reason: "A plain directory object should fall back to additionalData for user properties",
+			member: newTestDirectoryObject(),
+			want: map[string]interface{}{
+				"id":                "user-id-2",
+				"displayName":       "Fallback User",
+				"type":              "user",
+				"mail":              "user2@example.com",
+				"userPrincipalName": "user2@example.com",
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			g := &GraphQuery{log: logging.NewNopLogger()}
+			got := g.processMember(tc.member)
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("%s\nprocessMember(...): -want, +got:\n%s", tc.reason, diff)
 			}
 		})
 	}
