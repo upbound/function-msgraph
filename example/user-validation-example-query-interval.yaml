@@ -1,0 +1,38 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: user-validation-example-query-interval
+# Important: This function example requires an Azure AD app registration with Microsoft Graph API permissions:
+# - User.Read.All
+# - Directory.Read.All
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1
+    kind: XR
+  mode: Pipeline
+  pipeline:
+    - step: validate-user
+      functionRef:
+        name: function-msgraph
+      input:
+        apiVersion: msgraph.fn.crossplane.io/v1alpha1
+        kind: Input
+        queryType: UserValidation
+        # Replace these with actual users in your directory
+        users:
+          - "admin@example.onmicrosoft.com"
+          - "user@example.onmicrosoft.com"
+          - "yury@upbound.io"
+        target: "status.validatedUsers"
+        # queryInterval throttles calls to Microsoft Graph independently of how
+        # often the Composition reconciles. The function records the timestamp of
+        # its last successful query alongside the result at the status target and
+        # skips querying again until the interval (a Go duration string) elapses.
+        # Only effective in Composition mode with a "status." target.
+        queryInterval: "10m"
+      credentials:
+        - name: azure-creds
+          source: Secret
+          secretRef:
+            namespace: crossplane-system
+            name: azure-account-creds
