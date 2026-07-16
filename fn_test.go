@@ -3259,6 +3259,85 @@ func TestRunFunction(t *testing.T) {
 				},
 			},
 		},
+		"WarnWhenIntervalAndSkipWhenTargetHasDataCombined": {
+			reason: "The Function should emit a non-fatal warning (and still run) when queryInterval and skipQueryWhenTargetHasData are both set",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"users": ["user@example.com"],
+						"target": "status.validatedUsers",
+						"queryInterval": "10m",
+						"skipQueryWhenTargetHasData": true
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_WARNING,
+							Message:  "both queryInterval and skipQueryWhenTargetHasData are set; skipQueryWhenTargetHasData takes precedence once the target has data, so the queryInterval refresh will not run",
+							Target:   fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "UserValidation"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"metadata": {
+									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
+								},
+								"status": {
+									"validatedUsers": [
+										{
+											"id": "test-user-id",
+											"displayName": "Test User",
+											"userPrincipalName": "user@example.com",
+											"mail": "user@example.com"
+										},
+										{
+											"lastQueryTime": "2025-01-01T00:00:00+01:00"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
 		"QueryToContextField": {
 			reason: "The Function should store results in context field",
 			args: args{

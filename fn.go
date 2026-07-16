@@ -1205,9 +1205,18 @@ func (f *Function) validateAndPrepareInput(_ context.Context, req *fnv1.RunFunct
 
 	// Validate queryInterval early so a misconfigured duration is surfaced
 	// clearly instead of silently disabling interval limiting.
-	if _, _, err := parseQueryInterval(in); err != nil {
+	_, intervalSet, err := parseQueryInterval(in)
+	if err != nil {
 		response.Fatal(rsp, err)
 		return false
+	}
+
+	// Warn (non-fatal) when both throttling strategies are combined:
+	// skipQueryWhenTargetHasData takes precedence once the target has data, so
+	// it silently suppresses the queryInterval refresh.
+	if intervalSet && ptr.Deref(in.SkipQueryWhenTargetHasData, false) {
+		response.Warning(rsp, errors.New("both queryInterval and skipQueryWhenTargetHasData are set; skipQueryWhenTargetHasData takes precedence once the target has data, so the queryInterval refresh will not run")).
+			TargetCompositeAndClaim()
 	}
 
 	// Check if we should skip the query

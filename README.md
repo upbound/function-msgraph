@@ -310,7 +310,8 @@ complementary controls to reduce how often it calls the Graph API:
 
 These are intended as alternative strategies. If both are set, the interval is
 checked first, but `skipQueryWhenTargetHasData` takes over once the target holds
-data — so the interval refresh never runs. Pick one per pipeline step.
+data, so the interval refresh never runs. Pick one per pipeline step; the
+function emits a non-fatal warning when both are configured.
 
 ### Query Interval
 
