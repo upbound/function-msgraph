@@ -1,0 +1,19 @@
+# XR that already carries a lastQueryTime in status.validatedUsers, used to
+# demonstrate queryInterval skipping. `crossplane render` treats this XR as the
+# observed composite, so the function reads the timestamp below and skips the
+# Microsoft Graph query while the interval has not elapsed.
+#
+# The lastQueryTime here is set far in the future so the skip is deterministic
+# regardless of when you run the command. Change it to a real recent time
+# (within your queryInterval window) to exercise the natural elapsed boundary.
+apiVersion: example.crossplane.io/v1
+kind: XR
+metadata:
+  name: example-xr
+status:
+  validatedUsers:
+    - id: "existing-user-id"
+      displayName: "Existing User"
+      userPrincipalName: "user@example.onmicrosoft.com"
+      mail: "user@example.onmicrosoft.com"
+    - lastQueryTime: "2099-01-01T00:00:00Z"

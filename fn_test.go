@@ -2967,6 +2967,377 @@ func TestRunFunction(t *testing.T) {
 				},
 			},
 		},
+		"SkipQueryDueToInterval": {
+			reason: "The Function should skip the query when the queryInterval has not elapsed since the last query",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"users": ["user@example.com"],
+						"target": "status.validatedUsers",
+						"queryInterval": "10m"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"status": {
+									"validatedUsers": [
+										{
+											"id": "existing-user-id",
+											"displayName": "Existing User",
+											"userPrincipalName": "existing@example.com",
+											"mail": "existing@example.com"
+										},
+										{
+											"lastQueryTime": "2024-12-31T23:55:00+01:00"
+										}
+									]
+								}
+							}`),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:    "FunctionSkip",
+							Message: ptr.To("Query skipped due to interval limit (10m)"),
+							Status:  fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason:  "IntervalLimit",
+							Target:  fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"status": {
+									"validatedUsers": [
+										{
+											"id": "existing-user-id",
+											"displayName": "Existing User",
+											"userPrincipalName": "existing@example.com",
+											"mail": "existing@example.com"
+										},
+										{
+											"lastQueryTime": "2024-12-31T23:55:00+01:00"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"RunQueryWhenIntervalElapsed": {
+			reason: "The Function should run the query and refresh the timestamp when the queryInterval has elapsed",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"users": ["user@example.com"],
+						"target": "status.validatedUsers",
+						"queryInterval": "10m"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"status": {
+									"validatedUsers": [
+										{
+											"id": "existing-user-id",
+											"displayName": "Existing User",
+											"userPrincipalName": "existing@example.com",
+											"mail": "existing@example.com"
+										},
+										{
+											"lastQueryTime": "2024-12-31T22:00:00+01:00"
+										}
+									]
+								}
+							}`),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "UserValidation"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"status": {
+									"validatedUsers": [
+										{
+											"id": "test-user-id",
+											"displayName": "Test User",
+											"userPrincipalName": "user@example.com",
+											"mail": "user@example.com"
+										},
+										{
+											"lastQueryTime": "2025-01-01T00:00:00+01:00"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"RunQueryFirstTimeWithInterval": {
+			reason: "The Function should run the query and embed a lastQueryTime element on the first run when queryInterval is set and no prior data exists",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"users": ["user@example.com"],
+						"target": "status.validatedUsers",
+						"queryInterval": "10m"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "UserValidation"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"metadata": {
+									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
+								},
+								"status": {
+									"validatedUsers": [
+										{
+											"id": "test-user-id",
+											"displayName": "Test User",
+											"userPrincipalName": "user@example.com",
+											"mail": "user@example.com"
+										},
+										{
+											"lastQueryTime": "2025-01-01T00:00:00+01:00"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"InvalidQueryInterval": {
+			reason: "The Function should return a fatal result when queryInterval cannot be parsed as a Go duration",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"users": ["user@example.com"],
+						"target": "status.validatedUsers",
+						"queryInterval": "notaduration"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  `cannot parse queryInterval "notaduration" as a Go duration (e.g. "10m"): time: invalid duration "notaduration"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"metadata": {
+									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
+								}
+							}`),
+						},
+					},
+				},
+			},
+		},
+		"WarnWhenIntervalAndSkipWhenTargetHasDataCombined": {
+			reason: "The Function should emit a non-fatal warning (and still run) when queryInterval and skipQueryWhenTargetHasData are both set",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"users": ["user@example.com"],
+						"target": "status.validatedUsers",
+						"queryInterval": "10m",
+						"skipQueryWhenTargetHasData": true
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						"azure-creds": {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   "FunctionSuccess",
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: "Success",
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_WARNING,
+							Message:  "both queryInterval and skipQueryWhenTargetHasData are set; skipQueryWhenTargetHasData takes precedence once the target has data, so the queryInterval refresh will not run",
+							Target:   fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  `QueryType: "UserValidation"`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"metadata": {
+									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
+								},
+								"status": {
+									"validatedUsers": [
+										{
+											"id": "test-user-id",
+											"displayName": "Test User",
+											"userPrincipalName": "user@example.com",
+											"mail": "user@example.com"
+										},
+										{
+											"lastQueryTime": "2025-01-01T00:00:00+01:00"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
 		"QueryToContextField": {
 			reason: "The Function should store results in context field",
 			args: args{

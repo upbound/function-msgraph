@@ -275,6 +275,7 @@ spec:
 | `servicePrincipalsRef` | string | Reference to resolve a list of service principal names from `spec`, `status` or `context` (e.g., `spec.servicePrincipalConfig.names`) |
 | `target` | string | Required. Where to store the query results. Can be `status.<field>` or `context.<field>` |
 | `skipQueryWhenTargetHasData` | bool | Optional. When true, will skip the query if the target already has data |
+| `queryInterval` | string | Optional. Minimum interval between queries as a Go duration string (e.g. `10m`, `1h`, `90s`). Skips querying Microsoft Graph until the interval has elapsed since the last successful query, independent of reconcile frequency. Only effective in Composition mode with a `status.` target. |
 | `FailOnEmpty` | bool | Optional. When true, the function will fail if the `users`, `groups`, or `servicePrincipals` lists are empty, or if their respective reference fields are empty lists. |
 | `identity.type` | string | Optional. Type of identity credentials to use. Valid values: `AzureServicePrincipalCredentials`, `AzureWorkloadIdentityCredentials`. Default is `AzureServicePrincipalCredentials` |
 
@@ -295,6 +296,59 @@ target: "context.results"
 # Store in Environment
 target: "context.[apiextensions.crossplane.io/environment].results"
 ```
+
+## Throttling Mitigation
+
+Microsoft Graph enforces API request throttling. The function offers two
+complementary controls to reduce how often it calls the Graph API:
+
+- `skipQueryWhenTargetHasData` — skips the query whenever the target already
+  holds data. Useful when the data only needs to be fetched once.
+- `queryInterval` — skips the query until a minimum interval has elapsed since
+  the last successful query, then refreshes the data. Useful when the data
+  should be kept reasonably fresh without querying on every reconcile.
+
+These are intended as alternative strategies. If both are set, the interval is
+checked first, but `skipQueryWhenTargetHasData` takes over once the target holds
+data, so the interval refresh never runs. Pick one per pipeline step; the
+function emits a non-fatal warning when both are configured.
+
+### Query Interval
+
+`queryInterval` accepts a Go duration string (for example `10m`, `1h` or `90s`).
+When set, the function records the timestamp of its last successful query
+alongside the result stored at the status target and skips querying Microsoft
+Graph again until the interval has elapsed — regardless of how frequently the
+Composition reconciles.
+
+```yaml
+target: "status.validatedUsers"
+queryInterval: "10m"
+```
+
+The timestamp is persisted as an extra `lastQueryTime` element appended to the
+result list at the status target, for example:
+
+```yaml
+status:
+  validatedUsers:
+    - id: "a1b2c3"
+      displayName: "Jane Doe"
+      userPrincipalName: "jane@example.com"
+      mail: "jane@example.com"
+    - lastQueryTime: "2026-07-16T10:00:00Z"
+```
+
+Because the interval check reads the persisted timestamp back from the XR status
+on subsequent reconciles, `queryInterval` is only effective in **Composition
+mode with a `status.` target**. It has no effect for `context.` targets (context
+is not persisted across reconciles) or in Operation mode, where the query
+cadence is controlled by the `CronOperation` schedule or `WatchOperation`
+instead.
+
+> Note: consumers of the result list should ignore the trailing element that
+> carries `lastQueryTime` (it has no `id`), as it is metadata rather than a query
+> result.
 
 ## Using Reference Fields
 

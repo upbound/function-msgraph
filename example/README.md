@@ -121,3 +121,23 @@ crossplane render xr.yaml service-principal-example-context-ref.yaml functions.y
 ```shell
 crossplane render xr.yaml service-principal-example-spec-ref.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -rc
 ```
+
+### 5. Query Interval (Throttling)
+
+Throttle calls to Microsoft Graph with `queryInterval` (a Go duration string, e.g. `10m`). On a successful query the function appends a `lastQueryTime` timestamp to the results at the status target and, on later reconciles, skips querying until the interval has elapsed. It is only effective in Composition mode with a `status.` target.
+
+Run the query and observe the appended `lastQueryTime` element under `status.validatedUsers`:
+
+```shell
+crossplane render xr.yaml user-validation-example-query-interval.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -r
+```
+
+To observe the skip, render against an XR that already holds a recent `lastQueryTime`. `crossplane render` treats the XR file as the observed composite, so the function reads that timestamp and, while the interval has not elapsed, skips the query and emits a `FunctionSkip`/`IntervalLimit` condition instead of calling Graph:
+
+```shell
+crossplane render xr-with-last-query-time.yaml user-validation-example-query-interval.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -r
+```
+
+> `xr-with-last-query-time.yaml` uses a far-future `lastQueryTime` so the skip is deterministic; set it to a real recent time to test the natural elapsed boundary. The credentials are not used on the skip path (no Graph call is made), so they need not be valid for this command.
+
+> **macOS note:** these commands use `-r` (function results) rather than `-rc`. The `-c`/`--include-context` flag makes `crossplane render` v2.x run an internal context-extraction step over a unix socket bind-mounted into its Docker helper container, which Docker Desktop for macOS does not support (`connect: operation not supported`) — the render then hangs with no output. Since the query-interval results are written to a `status.` target, `-c` is unnecessary here. This is a known CLI bug ([crossplane/cli#161](https://github.com/crossplane/cli/issues/161)), fixed by [#163](https://github.com/crossplane/cli/pull/163) (context function now listens on TCP) but not yet in a tagged release as of CLI v2.4.0. Until then, drop `-c` on macOS, or run `crossplane render` on Linux / a CLI built from `main` if you need context output.

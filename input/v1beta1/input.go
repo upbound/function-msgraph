@@ -67,6 +67,19 @@ type Input struct {
 	// +optional
 	SkipQueryWhenTargetHasData *bool `json:"skipQueryWhenTargetHasData,omitempty"`
 
+	// QueryInterval is an optional minimum interval between queries, expressed as
+	// a Go duration string (for example "10m", "1h" or "90s"). When set, the
+	// function records the timestamp of its last successful query alongside the
+	// result stored at the status target and skips querying Microsoft Graph again
+	// until the interval has elapsed, regardless of how frequently the Composition
+	// reconciles. This helps avoid Microsoft Graph API throttling.
+	//
+	// Only effective in Composition mode with a "status." target, because it
+	// relies on reading the persisted timestamp back from the XR status on
+	// subsequent reconciles. Leave empty to disable interval limiting (the default).
+	// +optional
+	QueryInterval *string `json:"queryInterval,omitempty"`
+
 	// FailOnEmpty controls whether the function should fail when input lists are empty.
 	// If true, the function will error on empty input lists.
 	// If false or unset, empty lists are valid and will result in an empty list at the target.

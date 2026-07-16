@@ -1,0 +1,8 @@
+apiVersion: example.crossplane.io/v1
+kind: XR
+metadata:
+  name: msgraph-query-interval-e2e
+spec:
+  userAccess:
+    emails:
+      - "yury@upbound.io"
