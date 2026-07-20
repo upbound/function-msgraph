@@ -35,8 +35,11 @@ kubectl apply -f example/e2e/xr.yaml
 ## Verify
 
 ```shell
-# status carries the results plus a lastQueryTime element
+# the result list stays a clean list of results
 kubectl get xr msgraph-query-interval-e2e -o jsonpath='{.status.validatedUsers}' | jq
+
+# the query timestamp is recorded separately, keyed by target
+kubectl get xr msgraph-query-interval-e2e -o jsonpath='{.status.lastQueryTimestamps}' | jq
 
 # within the interval, reconciles skip (condition is set on the XR)
 kubectl get xr msgraph-query-interval-e2e -o jsonpath='{.status.conditions}' | jq   # FunctionSkip/IntervalLimit
@@ -49,7 +52,7 @@ kubectl logs -n crossplane-system "$POD" | grep -c 'interval limit'  # skips
 
 Force reconciles with `kubectl annotate xr msgraph-query-interval-e2e poke=$(date +%s) --overwrite`.
 Poking repeatedly inside the 2m window leaves the query count flat; after 2m
-elapses the next reconcile re-queries and `lastQueryTime` advances.
+elapses the next reconcile re-queries and `status.lastQueryTimestamps.validatedUsers` advances.
 
 ## Notes
 
