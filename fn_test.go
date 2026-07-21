@@ -26,6 +26,7 @@ const (
 	testCredentialsKey = "credentials"
 	testAzureCredsName = "azure-creds"
 	testSPID1          = "sp-id-1"
+	testUser1Email     = "user1@example.com"
 	testUser2Email     = "user2@example.com"
 	watchedResourceKey = "ops.crossplane.io/watched-resource"
 
@@ -988,15 +989,15 @@ func TestResolveGroupRef(t *testing.T) {
 							map[string]interface{}{
 								"id":                   "user-id-1",
 								fieldDisplayName:       "Test User 1",
-								fieldMail:              "user1@example.com",
-								fieldUserPrincipalName: "user1@example.com",
-								fieldType:              "user",
+								fieldMail:              testUser1Email,
+								fieldUserPrincipalName: testUser1Email,
+								fieldType:              userType,
 							},
 							map[string]interface{}{
 								"id":             testSPID1,
 								fieldDisplayName: "Test Service Principal",
 								fieldAppID:       "sp-app-id-1",
-								fieldType:        "servicePrincipal",
+								fieldType:        servicePrincipalType,
 							},
 						}, nil
 					}
@@ -1584,7 +1585,7 @@ func TestResolveUsersRef(t *testing.T) {
 
 							// Generate different test data based on user principal name
 							switch *user {
-							case "user1@example.com":
+							case testUser1Email:
 								userID = "user-id-1"
 								displayName = "User 1"
 							case testUser2Email:
@@ -3927,15 +3928,15 @@ func TestRunFunction(t *testing.T) {
 							map[string]interface{}{
 								"id":                   "user-id-1",
 								fieldDisplayName:       "Test User 1",
-								fieldMail:              "user1@example.com",
-								fieldUserPrincipalName: "user1@example.com",
-								fieldType:              "user",
+								fieldMail:              testUser1Email,
+								fieldUserPrincipalName: testUser1Email,
+								fieldType:              userType,
 							},
 							map[string]interface{}{
 								"id":             testSPID1,
 								fieldDisplayName: "Test Service Principal",
 								fieldAppID:       "sp-app-id-1",
-								fieldType:        "servicePrincipal",
+								fieldType:        servicePrincipalType,
 							},
 						}, nil
 					case "GroupObjectIDs":
@@ -4214,8 +4215,8 @@ func newTestUser() models.DirectoryObjectable {
 	user := models.NewUser()
 	user.SetId(ptr.To("user-id-1"))
 	user.SetDisplayName(ptr.To("Test User 1"))
-	user.SetMail(ptr.To("user1@example.com"))
-	user.SetUserPrincipalName(ptr.To("user1@example.com"))
+	user.SetMail(ptr.To(testUser1Email))
+	user.SetUserPrincipalName(ptr.To(testUser1Email))
 	return user
 }
 
@@ -4268,9 +4269,9 @@ func TestProcessMember(t *testing.T) {
 			want: map[string]interface{}{
 				"id":                   "user-id-1",
 				fieldDisplayName:       "Test User 1",
-				fieldType:              "user",
-				fieldMail:              "user1@example.com",
-				fieldUserPrincipalName: "user1@example.com",
+				fieldType:              userType,
+				fieldMail:              testUser1Email,
+				fieldUserPrincipalName: testUser1Email,
 			},
 		},
 		"TypedUserWithoutMailOmitsMail": {
@@ -4279,7 +4280,7 @@ func TestProcessMember(t *testing.T) {
 			want: map[string]interface{}{
 				"id":                   "user-id-3",
 				fieldDisplayName:       "No Mail User",
-				fieldType:              "user",
+				fieldType:              userType,
 				fieldUserPrincipalName: "nomail@example.com",
 			},
 		},
@@ -4289,7 +4290,7 @@ func TestProcessMember(t *testing.T) {
 			want: map[string]interface{}{
 				"id":             testSPID1,
 				fieldDisplayName: "Test Service Principal",
-				fieldType:        "servicePrincipal",
+				fieldType:        servicePrincipalType,
 				fieldAppID:       "sp-app-id-1",
 			},
 		},
@@ -4299,7 +4300,7 @@ func TestProcessMember(t *testing.T) {
 			want: map[string]interface{}{
 				"id":                   "user-id-2",
 				fieldDisplayName:       "Fallback User",
-				fieldType:              "user",
+				fieldType:              userType,
 				fieldMail:              testUser2Email,
 				fieldUserPrincipalName: testUser2Email,
 			},

@@ -74,6 +74,13 @@ const (
 	fieldType              = "type"
 )
 
+const (
+	// Member type discriminators returned for group members.
+	userType             = "user"
+	servicePrincipalType = "servicePrincipal"
+	unknownType          = "unknown"
+)
+
 // GraphQueryInterface defines the methods required for querying Microsoft Graph API.
 type GraphQueryInterface interface {
 	graphQuery(ctx context.Context, azureCreds map[string]string, in *v1beta1.Input) (interface{}, error)
@@ -707,13 +714,6 @@ func (g *GraphQuery) extractServicePrincipalProperties(member models.DirectoryOb
 
 // processMember extracts member information into a map
 func (g *GraphQuery) processMember(member models.DirectoryObjectable) map[string]interface{} {
-	// Define constants for member types
-	const (
-		userType             = "user"
-		servicePrincipalType = "servicePrincipal"
-		unknownType          = "unknown"
-	)
-
 	memberID := ptr.Deref(member.GetId(), "")
 	additionalData := member.GetAdditionalData()
 
