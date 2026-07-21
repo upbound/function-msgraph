@@ -103,6 +103,10 @@ spec:
                 items:
                   type: object
                 x-kubernetes-preserve-unknown-fields: true
+              lastQueryTimestamps:
+                description: queryInterval last successful query timestamps, keyed by target
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
         required:
         - spec
         type: object

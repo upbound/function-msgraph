@@ -55,6 +55,14 @@ const (
 	LastExecutionQueryDriftDetectedAnnotation = "function-msgraph/last-execution-query-drift-detected"
 )
 
+const (
+	// LastQueryTimestampsField is the XR status field under which the function
+	// records the timestamp of the last successful query, keyed by target. It is
+	// used by queryInterval to decide whether to skip a query, and is kept
+	// separate from the target so the query result itself stays a clean list.
+	LastQueryTimestampsField = "lastQueryTimestamps"
+)
+
 // GraphQueryInterface defines the methods required for querying Microsoft Graph API.
 type GraphQueryInterface interface {
 	graphQuery(ctx context.Context, azureCreds map[string]string, in *v1beta1.Input) (interface{}, error)
@@ -1019,16 +1027,17 @@ func (f *Function) putQueryResultToStatus(req *fnv1.RunFunctionRequest, rsp *fnv
 		return err
 	}
 
-	// Embed the query timestamp when interval limiting is configured so it can
-	// be read back on subsequent reconciles.
-	resultData := f.appendLastQueryTime(in, results)
-
-	// Update the specific status field
+	// Update the specific status field with the raw query result. The result is
+	// written as-is so downstream consumers see a clean value at the target.
 	statusField := strings.TrimPrefix(in.Target, "status.")
-	err = SetNestedKey(xrStatus, statusField, resultData)
-	if err != nil {
-		return errors.Wrapf(err, "cannot set status field %s to %v", statusField, resultData)
+	if err := SetNestedKey(xrStatus, statusField, results); err != nil {
+		return errors.Wrapf(err, "cannot set status field %s to %v", statusField, results)
 	}
+
+	// When interval limiting is configured, record the query timestamp in a
+	// separate metadata field (keyed by target) so it can be read back on
+	// subsequent reconciles without polluting the result.
+	f.recordLastQueryTimestamp(in, xrStatus, statusField)
 
 	// Write the updated status field back into the composite resource
 	if err := dxr.Resource.SetValue("status", xrStatus); err != nil {
@@ -1042,32 +1051,26 @@ func (f *Function) putQueryResultToStatus(req *fnv1.RunFunctionRequest, rsp *fnv
 	return nil
 }
 
-// appendLastQueryTime embeds the current timestamp into the query result so the
-// interval-based skip logic can read it back on subsequent reconciles. It is a
-// no-op unless queryInterval is configured. Array results (the intended
-// structure) get an extra {"lastQueryTime": ...} element; map results get a
-// lastQueryTime field.
-func (f *Function) appendLastQueryTime(in *v1beta1.Input, results interface{}) interface{} {
+// recordLastQueryTimestamp stores the current timestamp under the
+// LastQueryTimestampsField status map, keyed by the target field, when
+// queryInterval is configured. Keeping it separate from the target leaves the
+// query result untouched for downstream consumers. It is a no-op otherwise.
+func (f *Function) recordLastQueryTimestamp(in *v1beta1.Input, xrStatus map[string]interface{}, statusField string) {
 	if _, ok, _ := parseQueryInterval(in); !ok {
-		return results
+		return
 	}
 
-	timestamp := f.timer.now()
-	switch data := results.(type) {
-	case []interface{}:
-		f.log.Debug("Added lastQueryTime element to array result", "target", in.Target, "queryInterval", *in.QueryInterval)
-		return append(data, map[string]interface{}{"lastQueryTime": timestamp})
-	case map[string]interface{}:
-		data["lastQueryTime"] = timestamp
-		f.log.Debug("Added lastQueryTime to map result", "target", in.Target, "queryInterval", *in.QueryInterval)
-		return data
-	default:
-		f.log.Debug("Result data is neither array nor map, cannot add lastQueryTime",
-			"target", in.Target,
-			"resultType", fmt.Sprintf("%T", results),
-			"queryInterval", *in.QueryInterval)
-		return results
+	timestamps, ok := xrStatus[LastQueryTimestampsField].(map[string]interface{})
+	if !ok {
+		timestamps = make(map[string]interface{})
 	}
+	timestamps[statusField] = f.timer.now()
+	xrStatus[LastQueryTimestampsField] = timestamps
+
+	f.log.Debug("Recorded last query timestamp",
+		"field", LastQueryTimestampsField,
+		"target", statusField,
+		"queryInterval", *in.QueryInterval)
 }
 
 func putQueryResultToContext(req *fnv1.RunFunctionRequest, rsp *fnv1.RunFunctionResponse, in *v1beta1.Input, results interface{}, f *Function) error {
@@ -1397,8 +1400,8 @@ func parseQueryInterval(in *v1beta1.Input) (time.Duration, bool, error) {
 
 // shouldSkipQueryDueToInterval checks whether the configured queryInterval has
 // not yet elapsed since the last successful query, in which case the query
-// should be skipped. Interval limiting relies on reading the timestamp persisted
-// in the status target on a previous reconcile, so it only applies to
+// should be skipped. Interval limiting relies on the timestamp persisted under
+// the LastQueryTimestampsField on a previous reconcile, so it only applies to
 // Composition mode with a "status." target.
 func (f *Function) shouldSkipQueryDueToInterval(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse, inOperation bool) bool {
 	interval, ok, err := parseQueryInterval(in)
@@ -1413,104 +1416,42 @@ func (f *Function) shouldSkipQueryDueToInterval(req *fnv1.RunFunctionRequest, in
 		return false
 	}
 
-	targetData, err := f.getStatusTargetData(req, in, inOperation)
+	lastQueryTime, err := f.getLastQueryTimestamp(req, in, inOperation)
 	if err != nil {
-		f.log.Debug("No existing target data for interval check, running query", "target", in.Target, "error", err)
-		return false
-	}
-
-	lastQueryTime, err := f.extractLastQueryTime(targetData)
-	if err != nil {
-		f.log.Debug("No previous lastQueryTime found for interval check, running query", "target", in.Target, "error", err)
+		f.log.Debug("No previous query timestamp for interval check, running query", "target", in.Target, "error", err)
 		return false
 	}
 
 	return f.checkIntervalLimit(lastQueryTime, interval, *in.QueryInterval, in.Target, rsp)
 }
 
-// getStatusTargetData retrieves the current value stored at the status target
-// from the observed XR status.
-func (f *Function) getStatusTargetData(req *fnv1.RunFunctionRequest, in *v1beta1.Input, inOperation bool) (interface{}, error) {
+// getLastQueryTimestamp reads the timestamp recorded for the target from the
+// LastQueryTimestampsField map on the observed XR status.
+func (f *Function) getLastQueryTimestamp(req *fnv1.RunFunctionRequest, in *v1beta1.Input, inOperation bool) (time.Time, error) {
 	xrStatus, _, err := f.getOXRAndStatus(req, inOperation)
 	if err != nil {
-		return nil, errors.Wrap(err, "cannot get XR status for interval check")
+		return time.Time{}, errors.Wrap(err, "cannot get XR status for interval check")
+	}
+
+	timestamps, ok := xrStatus[LastQueryTimestampsField].(map[string]interface{})
+	if !ok {
+		return time.Time{}, errors.Errorf("no %s recorded", LastQueryTimestampsField)
 	}
 
 	statusField := strings.TrimPrefix(in.Target, "status.")
-	parts, err := ParseNestedKey(statusField)
-	if err != nil {
-		return nil, err
-	}
-
-	currentValue := interface{}(xrStatus)
-	for _, k := range parts {
-		nestedMap, ok := currentValue.(map[string]interface{})
-		if !ok {
-			return nil, errors.New("invalid nested structure")
-		}
-		nextValue, exists := nestedMap[k]
-		if !exists {
-			return nil, errors.New("no existing data")
-		}
-		currentValue = nextValue
-	}
-
-	return currentValue, nil
-}
-
-// extractLastQueryTime extracts and parses the lastQueryTime from target data,
-// supporting both array results (the intended structure) and map results.
-func (f *Function) extractLastQueryTime(targetData interface{}) (time.Time, error) {
-	if dataArray, ok := targetData.([]interface{}); ok {
-		return f.extractLastQueryTimeFromArray(dataArray)
-	}
-	if dataMap, ok := targetData.(map[string]interface{}); ok {
-		return f.extractLastQueryTimeFromMap(dataMap)
-	}
-	return time.Time{}, errors.New("target data is neither array nor map")
-}
-
-// extractLastQueryTimeFromArray extracts lastQueryTime from the special element
-// appended to array results.
-func (f *Function) extractLastQueryTimeFromArray(dataArray []interface{}) (time.Time, error) {
-	for i := len(dataArray) - 1; i >= 0; i-- {
-		element, ok := dataArray[i].(map[string]interface{})
-		if !ok {
-			continue
-		}
-		lastQueryTimeStr, exists := element["lastQueryTime"]
-		if !exists {
-			continue
-		}
-		lastQueryTimeString, ok := lastQueryTimeStr.(string)
-		if !ok {
-			continue
-		}
-		lastQueryTime, err := time.Parse(time.RFC3339, lastQueryTimeString)
-		if err != nil {
-			f.log.Debug("Cannot parse lastQueryTime from array element", "error", err)
-			return time.Time{}, err
-		}
-		return lastQueryTime, nil
-	}
-	return time.Time{}, errors.New("no lastQueryTime element found in array")
-}
-
-// extractLastQueryTimeFromMap extracts lastQueryTime from a map result.
-func (f *Function) extractLastQueryTimeFromMap(dataMap map[string]interface{}) (time.Time, error) {
-	lastQueryTimeStr, exists := dataMap["lastQueryTime"]
-	if !exists {
-		return time.Time{}, errors.New("no lastQueryTime field")
-	}
-
-	lastQueryTimeString, ok := lastQueryTimeStr.(string)
+	raw, ok := timestamps[statusField]
 	if !ok {
-		return time.Time{}, errors.New("lastQueryTime is not a string")
+		return time.Time{}, errors.Errorf("no query timestamp recorded for target %q", statusField)
 	}
 
-	lastQueryTime, err := time.Parse(time.RFC3339, lastQueryTimeString)
+	value, ok := raw.(string)
+	if !ok {
+		return time.Time{}, errors.New("recorded query timestamp is not a string")
+	}
+
+	lastQueryTime, err := time.Parse(time.RFC3339, value)
 	if err != nil {
-		f.log.Debug("Cannot parse lastQueryTime", "error", err)
+		f.log.Debug("Cannot parse recorded query timestamp", "error", err)
 		return time.Time{}, err
 	}
 

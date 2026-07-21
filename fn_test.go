@@ -2993,11 +2993,11 @@ func TestRunFunction(t *testing.T) {
 											"displayName": "Existing User",
 											"userPrincipalName": "existing@example.com",
 											"mail": "existing@example.com"
-										},
-										{
-											"lastQueryTime": "2024-12-31T23:55:00+01:00"
 										}
-									]
+									],
+									"lastQueryTimestamps": {
+										"validatedUsers": "2024-12-31T23:55:00+01:00"
+									}
 								}
 							}`),
 						},
@@ -3039,11 +3039,11 @@ func TestRunFunction(t *testing.T) {
 											"displayName": "Existing User",
 											"userPrincipalName": "existing@example.com",
 											"mail": "existing@example.com"
-										},
-										{
-											"lastQueryTime": "2024-12-31T23:55:00+01:00"
 										}
-									]
+									],
+									"lastQueryTimestamps": {
+										"validatedUsers": "2024-12-31T23:55:00+01:00"
+									}
 								}}`),
 						},
 					},
@@ -3076,11 +3076,11 @@ func TestRunFunction(t *testing.T) {
 											"displayName": "Existing User",
 											"userPrincipalName": "existing@example.com",
 											"mail": "existing@example.com"
-										},
-										{
-											"lastQueryTime": "2024-12-31T22:00:00+01:00"
 										}
-									]
+									],
+									"lastQueryTimestamps": {
+										"validatedUsers": "2024-12-31T22:00:00+01:00"
+									}
 								}
 							}`),
 						},
@@ -3122,11 +3122,11 @@ func TestRunFunction(t *testing.T) {
 											"displayName": "Test User",
 											"userPrincipalName": "user@example.com",
 											"mail": "user@example.com"
-										},
-										{
-											"lastQueryTime": "2025-01-01T00:00:00+01:00"
 										}
-									]
+									],
+									"lastQueryTimestamps": {
+										"validatedUsers": "2025-01-01T00:00:00+01:00"
+									}
 								}}`),
 						},
 					},
@@ -3134,7 +3134,7 @@ func TestRunFunction(t *testing.T) {
 			},
 		},
 		"RunQueryFirstTimeWithInterval": {
-			reason: "The Function should run the query and embed a lastQueryTime element on the first run when queryInterval is set and no prior data exists",
+			reason: "The Function should run the query and record the query timestamp on the first run when queryInterval is set and no prior data exists",
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
@@ -3195,11 +3195,11 @@ func TestRunFunction(t *testing.T) {
 											"displayName": "Test User",
 											"userPrincipalName": "user@example.com",
 											"mail": "user@example.com"
-										},
-										{
-											"lastQueryTime": "2025-01-01T00:00:00+01:00"
 										}
-									]
+									],
+									"lastQueryTimestamps": {
+										"validatedUsers": "2025-01-01T00:00:00+01:00"
+									}
 								}}`),
 						},
 					},
@@ -3327,11 +3327,11 @@ func TestRunFunction(t *testing.T) {
 											"displayName": "Test User",
 											"userPrincipalName": "user@example.com",
 											"mail": "user@example.com"
-										},
-										{
-											"lastQueryTime": "2025-01-01T00:00:00+01:00"
 										}
-									]
+									],
+									"lastQueryTimestamps": {
+										"validatedUsers": "2025-01-01T00:00:00+01:00"
+									}
 								}}`),
 						},
 					},
