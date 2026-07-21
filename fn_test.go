@@ -20,6 +20,26 @@ import (
 	"github.com/crossplane/function-sdk-go/response"
 )
 
+const (
+	// Repeated fixture values used across the table-driven tests.
+	testRequestTag     = "hello"
+	testCredentialsKey = "credentials"
+	testAzureCredsName = "azure-creds"
+	testSPID1          = "sp-id-1"
+	testUser1Email     = "user1@example.com"
+	testUser2Email     = "user2@example.com"
+	watchedResourceKey = "ops.crossplane.io/watched-resource"
+
+	// Condition fields asserted on successful function responses.
+	condTypeFunctionSuccess = "FunctionSuccess"
+	condReasonSuccess       = "Success"
+
+	// Result messages emitted per query type.
+	msgUserValidationQueryType          = `QueryType: "UserValidation"`
+	msgGroupObjectIDsQueryType          = `QueryType: "GroupObjectIDs"`
+	msgServicePrincipalDetailsQueryType = `QueryType: "ServicePrincipalDetails"`
+)
+
 type MockGraphQuery struct {
 	GraphQueryFunc func(ctx context.Context, azureCreds map[string]string, in *v1beta1.Input) (interface{}, error)
 }
@@ -40,7 +60,7 @@ func TestResolveGroupsRef(t *testing.T) {
 		xr    = `{"apiVersion":"example.org/v1","kind":"XR","metadata":{"name":"cool-xr"},"spec":{"count":2}}`
 		creds = &fnv1.CredentialData{
 			Data: map[string][]byte{
-				"credentials": []byte(`{
+				testCredentialsKey: []byte(`{
 "clientId": "test-client-id",
 "clientSecret": "test-client-secret",
 "subscriptionId": "test-subscription-id",
@@ -69,7 +89,7 @@ func TestResolveGroupsRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -89,7 +109,7 @@ func TestResolveGroupsRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -97,19 +117,19 @@ func TestResolveGroupsRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "GroupObjectIDs"`,
+							Message:  msgGroupObjectIDsQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -148,7 +168,7 @@ func TestResolveGroupsRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -165,7 +185,7 @@ func TestResolveGroupsRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -173,19 +193,19 @@ func TestResolveGroupsRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "GroupObjectIDs"`,
+							Message:  msgGroupObjectIDsQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -232,7 +252,7 @@ func TestResolveGroupsRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -254,7 +274,7 @@ func TestResolveGroupsRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -262,19 +282,19 @@ func TestResolveGroupsRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "GroupObjectIDs"`,
+							Message:  msgGroupObjectIDsQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -317,7 +337,7 @@ func TestResolveGroupsRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -339,7 +359,7 @@ func TestResolveGroupsRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -347,19 +367,19 @@ func TestResolveGroupsRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "GroupObjectIDs"`,
+							Message:  msgGroupObjectIDsQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -386,7 +406,7 @@ func TestResolveGroupsRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -409,7 +429,7 @@ func TestResolveGroupsRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -417,19 +437,19 @@ func TestResolveGroupsRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "GroupObjectIDs"`,
+							Message:  msgGroupObjectIDsQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -456,7 +476,7 @@ func TestResolveGroupsRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -479,7 +499,7 @@ func TestResolveGroupsRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -487,7 +507,7 @@ func TestResolveGroupsRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta:       &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta:       &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{},
 					Results: []*fnv1.Result{
 						{
@@ -516,7 +536,7 @@ func TestResolveGroupsRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -530,7 +550,7 @@ func TestResolveGroupsRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -538,7 +558,7 @@ func TestResolveGroupsRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_FATAL,
@@ -593,9 +613,9 @@ func TestResolveGroupsRef(t *testing.T) {
 							}
 
 							groupMap := map[string]interface{}{
-								"id":          groupID,
-								"displayName": *group,
-								"description": description,
+								"id":             groupID,
+								fieldDisplayName: *group,
+								fieldDescription: description,
 							}
 							results = append(results, groupMap)
 						}
@@ -628,7 +648,7 @@ func TestResolveGroupRef(t *testing.T) {
 		xr    = `{"apiVersion":"example.org/v1","kind":"XR","metadata":{"name":"cool-xr"},"spec":{"count":2}}`
 		creds = &fnv1.CredentialData{
 			Data: map[string][]byte{
-				"credentials": []byte(`{
+				testCredentialsKey: []byte(`{
 "clientId": "test-client-id",
 "clientSecret": "test-client-secret",
 "subscriptionId": "test-subscription-id",
@@ -657,7 +677,7 @@ func TestResolveGroupRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -679,7 +699,7 @@ func TestResolveGroupRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -687,12 +707,12 @@ func TestResolveGroupRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
@@ -738,7 +758,7 @@ func TestResolveGroupRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -757,7 +777,7 @@ func TestResolveGroupRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -765,12 +785,12 @@ func TestResolveGroupRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
@@ -824,7 +844,7 @@ func TestResolveGroupRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -846,7 +866,7 @@ func TestResolveGroupRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -854,12 +874,12 @@ func TestResolveGroupRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
@@ -907,7 +927,7 @@ func TestResolveGroupRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -921,7 +941,7 @@ func TestResolveGroupRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -929,7 +949,7 @@ func TestResolveGroupRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_FATAL,
@@ -967,17 +987,17 @@ func TestResolveGroupRef(t *testing.T) {
 						}
 						return []interface{}{
 							map[string]interface{}{
-								"id":                "user-id-1",
-								"displayName":       "Test User 1",
-								"mail":              "user1@example.com",
-								"userPrincipalName": "user1@example.com",
-								"type":              "user",
+								"id":                   "user-id-1",
+								fieldDisplayName:       "Test User 1",
+								fieldMail:              testUser1Email,
+								fieldUserPrincipalName: testUser1Email,
+								fieldType:              userType,
 							},
 							map[string]interface{}{
-								"id":          "sp-id-1",
-								"displayName": "Test Service Principal",
-								"appId":       "sp-app-id-1",
-								"type":        "servicePrincipal",
+								"id":             testSPID1,
+								fieldDisplayName: "Test Service Principal",
+								fieldAppID:       "sp-app-id-1",
+								fieldType:        servicePrincipalType,
 							},
 						}, nil
 					}
@@ -1008,7 +1028,7 @@ func TestResolveUsersRef(t *testing.T) {
 		xr    = `{"apiVersion":"example.org/v1","kind":"XR","metadata":{"name":"cool-xr"},"spec":{"count":2}}`
 		creds = &fnv1.CredentialData{
 			Data: map[string][]byte{
-				"credentials": []byte(`{
+				testCredentialsKey: []byte(`{
 "clientId": "test-client-id",
 "clientSecret": "test-client-secret",
 "subscriptionId": "test-subscription-id",
@@ -1037,7 +1057,7 @@ func TestResolveUsersRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -1057,7 +1077,7 @@ func TestResolveUsersRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -1065,19 +1085,19 @@ func TestResolveUsersRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "UserValidation"`,
+							Message:  msgUserValidationQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -1119,7 +1139,7 @@ func TestResolveUsersRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -1136,7 +1156,7 @@ func TestResolveUsersRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -1144,19 +1164,19 @@ func TestResolveUsersRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "UserValidation"`,
+							Message:  msgUserValidationQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -1206,7 +1226,7 @@ func TestResolveUsersRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -1228,7 +1248,7 @@ func TestResolveUsersRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -1236,19 +1256,19 @@ func TestResolveUsersRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "UserValidation"`,
+							Message:  msgUserValidationQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -1294,7 +1314,7 @@ func TestResolveUsersRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -1316,7 +1336,7 @@ func TestResolveUsersRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -1324,19 +1344,19 @@ func TestResolveUsersRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "UserValidation"`,
+							Message:  msgUserValidationQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -1363,7 +1383,7 @@ func TestResolveUsersRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -1386,7 +1406,7 @@ func TestResolveUsersRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -1394,19 +1414,19 @@ func TestResolveUsersRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "UserValidation"`,
+							Message:  msgUserValidationQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -1433,7 +1453,7 @@ func TestResolveUsersRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -1456,7 +1476,7 @@ func TestResolveUsersRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -1464,7 +1484,7 @@ func TestResolveUsersRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta:       &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta:       &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{},
 					Results: []*fnv1.Result{
 						{
@@ -1493,7 +1513,7 @@ func TestResolveUsersRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -1507,7 +1527,7 @@ func TestResolveUsersRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -1515,7 +1535,7 @@ func TestResolveUsersRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_FATAL,
@@ -1565,10 +1585,10 @@ func TestResolveUsersRef(t *testing.T) {
 
 							// Generate different test data based on user principal name
 							switch *user {
-							case "user1@example.com":
+							case testUser1Email:
 								userID = "user-id-1"
 								displayName = "User 1"
-							case "user2@example.com":
+							case testUser2Email:
 								userID = "user-id-2"
 								displayName = "User 2"
 							case "admin@example.onmicrosoft.com":
@@ -1580,10 +1600,10 @@ func TestResolveUsersRef(t *testing.T) {
 							}
 
 							userMap := map[string]interface{}{
-								"id":                userID,
-								"displayName":       displayName,
-								"userPrincipalName": *user,
-								"mail":              *user,
+								"id":                   userID,
+								fieldDisplayName:       displayName,
+								fieldUserPrincipalName: *user,
+								fieldMail:              *user,
 							}
 							results = append(results, userMap)
 						}
@@ -1616,7 +1636,7 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 		xr    = `{"apiVersion":"example.org/v1","kind":"XR","metadata":{"name":"cool-xr"},"spec":{"count":2}}`
 		creds = &fnv1.CredentialData{
 			Data: map[string][]byte{
-				"credentials": []byte(`{
+				testCredentialsKey: []byte(`{
 "clientId": "test-client-id",
 "clientSecret": "test-client-secret",
 "subscriptionId": "test-subscription-id",
@@ -1645,7 +1665,7 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -1665,7 +1685,7 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -1673,19 +1693,19 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "ServicePrincipalDetails"`,
+							Message:  msgServicePrincipalDetailsQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -1727,7 +1747,7 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -1744,7 +1764,7 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -1752,19 +1772,19 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "ServicePrincipalDetails"`,
+							Message:  msgServicePrincipalDetailsQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -1814,7 +1834,7 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -1836,7 +1856,7 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -1844,19 +1864,19 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "ServicePrincipalDetails"`,
+							Message:  msgServicePrincipalDetailsQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -1902,7 +1922,7 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -1924,7 +1944,7 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -1932,19 +1952,19 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "ServicePrincipalDetails"`,
+							Message:  msgServicePrincipalDetailsQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -1971,7 +1991,7 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -1994,7 +2014,7 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -2002,19 +2022,19 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "ServicePrincipalDetails"`,
+							Message:  msgServicePrincipalDetailsQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -2041,7 +2061,7 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -2064,7 +2084,7 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -2072,7 +2092,7 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta:       &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta:       &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{},
 					Results: []*fnv1.Result{
 						{
@@ -2101,7 +2121,7 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -2115,7 +2135,7 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -2123,7 +2143,7 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_FATAL,
@@ -2175,7 +2195,7 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 							// Generate different test data based on service principal name
 							switch *sp {
 							case "MyServiceApp":
-								spID = "sp-id-1"
+								spID = testSPID1
 								appID = "app-id-1"
 								description = "Service application"
 							case "ApiConnector":
@@ -2193,10 +2213,10 @@ func TestResolveServicePrincipalsRef(t *testing.T) {
 							}
 
 							spMap := map[string]interface{}{
-								"id":          spID,
-								"appId":       appID,
-								"displayName": *sp,
-								"description": description,
+								"id":             spID,
+								fieldAppID:       appID,
+								fieldDisplayName: *sp,
+								fieldDescription: description,
 							}
 							results = append(results, spMap)
 						}
@@ -2229,7 +2249,7 @@ func TestRunFunction(t *testing.T) {
 		xr    = `{"apiVersion":"example.org/v1","kind":"XR","metadata":{"name":"cool-xr","finalizers":["composite.apiextensions.crossplane.io"]},"spec":{"count":2}}`
 		creds = &fnv1.CredentialData{
 			Data: map[string][]byte{
-				"credentials": []byte(`{
+				testCredentialsKey: []byte(`{
 "clientId": "test-cliend-id",
 "clientSecret": "test-client-secret",
 "subscriptionId": "test-subscription-id",
@@ -2257,7 +2277,7 @@ func TestRunFunction(t *testing.T) {
 			reason: "The Function should return a fatal result if no credentials were specified",
 			args: args{
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -2273,7 +2293,7 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_FATAL,
@@ -2302,7 +2322,7 @@ func TestRunFunction(t *testing.T) {
 			reason: "The Function should return a fatal result if no target is specified",
 			args: args{
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -2315,7 +2335,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -2323,7 +2343,7 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_FATAL,
@@ -2353,7 +2373,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -2366,7 +2386,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -2374,7 +2394,7 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_FATAL,
@@ -2404,7 +2424,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -2418,7 +2438,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -2426,19 +2446,19 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "UserValidation"`,
+							Message:  msgUserValidationQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -2473,7 +2493,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -2486,7 +2506,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -2494,7 +2514,7 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_FATAL,
@@ -2524,7 +2544,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -2538,7 +2558,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -2546,12 +2566,12 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
@@ -2600,7 +2620,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -2613,7 +2633,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -2621,7 +2641,7 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_FATAL,
@@ -2651,7 +2671,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -2665,7 +2685,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -2673,19 +2693,19 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "GroupObjectIDs"`,
+							Message:  msgGroupObjectIDsQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -2724,7 +2744,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -2737,7 +2757,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -2745,7 +2765,7 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_FATAL,
@@ -2775,7 +2795,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -2789,7 +2809,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -2797,19 +2817,19 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "ServicePrincipalDetails"`,
+							Message:  msgServicePrincipalDetailsQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -2844,7 +2864,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -2857,7 +2877,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -2865,7 +2885,7 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_FATAL,
@@ -2895,7 +2915,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -2923,7 +2943,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -2931,7 +2951,7 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
 							Type:    "FunctionSkip",
@@ -2941,9 +2961,9 @@ func TestRunFunction(t *testing.T) {
 							Target:  fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
@@ -2972,7 +2992,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -3003,7 +3023,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -3011,7 +3031,7 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
 							Type:    "FunctionSkip",
@@ -3021,9 +3041,9 @@ func TestRunFunction(t *testing.T) {
 							Target:  fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
@@ -3055,7 +3075,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -3086,7 +3106,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -3094,19 +3114,19 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "UserValidation"`,
+							Message:  msgUserValidationQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -3138,7 +3158,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -3153,7 +3173,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -3161,19 +3181,19 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "UserValidation"`,
+							Message:  msgUserValidationQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -3211,7 +3231,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -3226,7 +3246,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -3234,7 +3254,7 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_FATAL,
@@ -3264,7 +3284,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -3280,7 +3300,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -3288,12 +3308,12 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
@@ -3305,7 +3325,7 @@ func TestRunFunction(t *testing.T) {
 						},
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "UserValidation"`,
+							Message:  msgUserValidationQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -3343,7 +3363,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -3357,7 +3377,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -3365,19 +3385,19 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "UserValidation"`,
+							Message:  msgUserValidationQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -3415,7 +3435,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -3424,7 +3444,7 @@ func TestRunFunction(t *testing.T) {
 						"target": "context.validatedUsers"
 					}`),
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
@@ -3433,7 +3453,7 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_FATAL,
@@ -3449,7 +3469,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -3458,12 +3478,12 @@ func TestRunFunction(t *testing.T) {
 						"target": "context.validatedUsers"
 					}`),
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
 					RequiredResources: map[string]*fnv1.Resources{
-						"ops.crossplane.io/watched-resource": {
+						watchedResourceKey: {
 							Items: nil,
 						},
 					},
@@ -3471,7 +3491,7 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_FATAL,
@@ -3487,7 +3507,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -3496,12 +3516,12 @@ func TestRunFunction(t *testing.T) {
 						"target": "context.validatedUsers"
 					}`),
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
 					RequiredResources: map[string]*fnv1.Resources{
-						"ops.crossplane.io/watched-resource": {
+						watchedResourceKey: {
 							Items: []*fnv1.Resource{
 								{
 									Resource: resource.MustStructJSON(xr),
@@ -3516,7 +3536,7 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_FATAL,
@@ -3532,7 +3552,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -3541,12 +3561,12 @@ func TestRunFunction(t *testing.T) {
 						"target": "context.validatedUsers"
 					}`),
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
 					RequiredResources: map[string]*fnv1.Resources{
-						"ops.crossplane.io/watched-resource": {
+						watchedResourceKey: {
 							Items: []*fnv1.Resource{
 								{},
 							},
@@ -3556,7 +3576,7 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_FATAL,
@@ -3572,7 +3592,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -3581,12 +3601,12 @@ func TestRunFunction(t *testing.T) {
 						"target": "status.validatedUsers"
 					}`),
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
 					RequiredResources: map[string]*fnv1.Resources{
-						"ops.crossplane.io/watched-resource": {
+						watchedResourceKey: {
 							Items: []*fnv1.Resource{
 								{
 									Resource: resource.MustStructJSON(`{"apiVersion":"example.org/v1","kind":"XR","metadata":{"name":"cool-xr"},"spec":{"count":2}}`),
@@ -3598,7 +3618,7 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_FATAL,
@@ -3614,7 +3634,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -3623,12 +3643,12 @@ func TestRunFunction(t *testing.T) {
 						"target": "status.validatedUsers"
 					}`),
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
 					RequiredResources: map[string]*fnv1.Resources{
-						"ops.crossplane.io/watched-resource": {
+						watchedResourceKey: {
 							Items: []*fnv1.Resource{
 								{
 									Resource: resource.MustStructJSON(`{
@@ -3662,19 +3682,19 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "UserValidation"`,
+							Message:  msgUserValidationQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -3703,7 +3723,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -3712,12 +3732,12 @@ func TestRunFunction(t *testing.T) {
 						"target": "status.validatedUsers"
 					}`),
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
 					RequiredResources: map[string]*fnv1.Resources{
-						"ops.crossplane.io/watched-resource": {
+						watchedResourceKey: {
 							Items: []*fnv1.Resource{
 								{
 									Resource: resource.MustStructJSON(`{
@@ -3754,19 +3774,19 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "UserValidation"`,
+							Message:  msgUserValidationQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -3796,7 +3816,7 @@ func TestRunFunction(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -3805,12 +3825,12 @@ func TestRunFunction(t *testing.T) {
 						"target": "status.validatedUsers"
 					}`),
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
 						},
 					},
 					RequiredResources: map[string]*fnv1.Resources{
-						"ops.crossplane.io/watched-resource": {
+						watchedResourceKey: {
 							Items: []*fnv1.Resource{
 								{
 									Resource: resource.MustStructJSON(`{
@@ -3844,19 +3864,19 @@ func TestRunFunction(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Conditions: []*fnv1.Condition{
 						{
-							Type:   "FunctionSuccess",
+							Type:   condTypeFunctionSuccess,
 							Status: fnv1.Status_STATUS_CONDITION_TRUE,
-							Reason: "Success",
+							Reason: condReasonSuccess,
 							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
 						},
 					},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "UserValidation"`,
+							Message:  msgUserValidationQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -3894,10 +3914,10 @@ func TestRunFunction(t *testing.T) {
 						}
 						return []interface{}{
 							map[string]interface{}{
-								"id":                "test-user-id",
-								"displayName":       "Test User",
-								"userPrincipalName": "user@example.com",
-								"mail":              "user@example.com",
+								"id":                   "test-user-id",
+								fieldDisplayName:       "Test User",
+								fieldUserPrincipalName: "user@example.com",
+								fieldMail:              "user@example.com",
 							},
 						}, nil
 					case "GroupMembership":
@@ -3906,17 +3926,17 @@ func TestRunFunction(t *testing.T) {
 						}
 						return []interface{}{
 							map[string]interface{}{
-								"id":                "user-id-1",
-								"displayName":       "Test User 1",
-								"mail":              "user1@example.com",
-								"userPrincipalName": "user1@example.com",
-								"type":              "user",
+								"id":                   "user-id-1",
+								fieldDisplayName:       "Test User 1",
+								fieldMail:              testUser1Email,
+								fieldUserPrincipalName: testUser1Email,
+								fieldType:              userType,
 							},
 							map[string]interface{}{
-								"id":          "sp-id-1",
-								"displayName": "Test Service Principal",
-								"appId":       "sp-app-id-1",
-								"type":        "servicePrincipal",
+								"id":             testSPID1,
+								fieldDisplayName: "Test Service Principal",
+								fieldAppID:       "sp-app-id-1",
+								fieldType:        servicePrincipalType,
 							},
 						}, nil
 					case "GroupObjectIDs":
@@ -3925,14 +3945,14 @@ func TestRunFunction(t *testing.T) {
 						}
 						return []interface{}{
 							map[string]interface{}{
-								"id":          "group-id-1",
-								"displayName": "Developers",
-								"description": "Development team",
+								"id":             "group-id-1",
+								fieldDisplayName: "Developers",
+								fieldDescription: "Development team",
 							},
 							map[string]interface{}{
-								"id":          "group-id-2",
-								"displayName": "Operations",
-								"description": "Operations team",
+								"id":             "group-id-2",
+								fieldDisplayName: "Operations",
+								fieldDescription: "Operations team",
 							},
 						}, nil
 					case "ServicePrincipalDetails":
@@ -3941,10 +3961,10 @@ func TestRunFunction(t *testing.T) {
 						}
 						return []interface{}{
 							map[string]interface{}{
-								"id":          "sp-id-1",
-								"appId":       "app-id-1",
-								"displayName": "MyServiceApp",
-								"description": "Service application",
+								"id":             testSPID1,
+								fieldAppID:       "app-id-1",
+								fieldDisplayName: "MyServiceApp",
+								fieldDescription: "Service application",
 							},
 						}, nil
 					default:
@@ -3981,7 +4001,7 @@ func TestIdentityType(t *testing.T) {
 				}}`
 		servicePrincipalCreds = &fnv1.CredentialData{
 			Data: map[string][]byte{
-				"credentials": []byte(`{
+				testCredentialsKey: []byte(`{
 "clientId": "test-client-id",
 "clientSecret": "test-client-secret",
 "subscriptionId": "test-subscription-id",
@@ -3991,7 +4011,7 @@ func TestIdentityType(t *testing.T) {
 		}
 		workloadIdentityCredentials = &fnv1.CredentialData{
 			Data: map[string][]byte{
-				"credentials": []byte(`{
+				testCredentialsKey: []byte(`{
 "federatedTokenFile": "/var/run/secrets/azure/tokens/azure-identity-token"
 }`),
 			},
@@ -4017,7 +4037,7 @@ func TestIdentityType(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -4031,7 +4051,7 @@ func TestIdentityType(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: servicePrincipalCreds},
 						},
 					},
@@ -4039,7 +4059,7 @@ func TestIdentityType(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_FATAL,
@@ -4060,7 +4080,7 @@ func TestIdentityType(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -4077,7 +4097,7 @@ func TestIdentityType(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: servicePrincipalCreds},
 						},
 					},
@@ -4085,7 +4105,7 @@ func TestIdentityType(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_FATAL,
@@ -4106,7 +4126,7 @@ func TestIdentityType(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
-					Meta: &fnv1.RequestMeta{Tag: "hello"},
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
 					Input: resource.MustStructJSON(`{
 						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
 						"kind": "Input",
@@ -4123,7 +4143,7 @@ func TestIdentityType(t *testing.T) {
 						},
 					},
 					Credentials: map[string]*fnv1.Credentials{
-						"azure-creds": {
+						testAzureCredsName: {
 							Source: &fnv1.Credentials_CredentialData{CredentialData: workloadIdentityCredentials},
 						},
 					},
@@ -4131,7 +4151,7 @@ func TestIdentityType(t *testing.T) {
 			},
 			want: want{
 				rsp: &fnv1.RunFunctionResponse{
-					Meta: &fnv1.ResponseMeta{Tag: "hello", Ttl: durationpb.New(response.DefaultTTL)},
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_FATAL,
@@ -4195,8 +4215,8 @@ func newTestUser() models.DirectoryObjectable {
 	user := models.NewUser()
 	user.SetId(ptr.To("user-id-1"))
 	user.SetDisplayName(ptr.To("Test User 1"))
-	user.SetMail(ptr.To("user1@example.com"))
-	user.SetUserPrincipalName(ptr.To("user1@example.com"))
+	user.SetMail(ptr.To(testUser1Email))
+	user.SetUserPrincipalName(ptr.To(testUser1Email))
 	return user
 }
 
@@ -4215,7 +4235,7 @@ func newTestUserWithoutMail() models.DirectoryObjectable {
 // newTestServicePrincipal builds a typed service principal directory object.
 func newTestServicePrincipal() models.DirectoryObjectable {
 	sp := models.NewServicePrincipal()
-	sp.SetId(ptr.To("sp-id-1"))
+	sp.SetId(ptr.To(testSPID1))
 	sp.SetDisplayName(ptr.To("Test Service Principal"))
 	sp.SetAppId(ptr.To("sp-app-id-1"))
 	return sp
@@ -4227,9 +4247,9 @@ func newTestDirectoryObject() models.DirectoryObjectable {
 	do := models.NewDirectoryObject()
 	do.SetId(ptr.To("user-id-2"))
 	do.SetAdditionalData(map[string]interface{}{
-		"displayName":       "Fallback User",
-		"mail":              "user2@example.com",
-		"userPrincipalName": "user2@example.com",
+		fieldDisplayName:       "Fallback User",
+		fieldMail:              testUser2Email,
+		fieldUserPrincipalName: testUser2Email,
 	})
 	return do
 }
@@ -4247,42 +4267,42 @@ func TestProcessMember(t *testing.T) {
 			reason: "A typed user member should expose mail and userPrincipalName from the typed getters",
 			member: newTestUser(),
 			want: map[string]interface{}{
-				"id":                "user-id-1",
-				"displayName":       "Test User 1",
-				"type":              "user",
-				"mail":              "user1@example.com",
-				"userPrincipalName": "user1@example.com",
+				"id":                   "user-id-1",
+				fieldDisplayName:       "Test User 1",
+				fieldType:              userType,
+				fieldMail:              testUser1Email,
+				fieldUserPrincipalName: testUser1Email,
 			},
 		},
 		"TypedUserWithoutMailOmitsMail": {
 			reason: "A typed user without a mail attribute should omit mail but still expose userPrincipalName",
 			member: newTestUserWithoutMail(),
 			want: map[string]interface{}{
-				"id":                "user-id-3",
-				"displayName":       "No Mail User",
-				"type":              "user",
-				"userPrincipalName": "nomail@example.com",
+				"id":                   "user-id-3",
+				fieldDisplayName:       "No Mail User",
+				fieldType:              userType,
+				fieldUserPrincipalName: "nomail@example.com",
 			},
 		},
 		"TypedServicePrincipalIncludesAppID": {
 			reason: "A typed service principal member should expose appId from the typed getter",
 			member: newTestServicePrincipal(),
 			want: map[string]interface{}{
-				"id":          "sp-id-1",
-				"displayName": "Test Service Principal",
-				"type":        "servicePrincipal",
-				"appId":       "sp-app-id-1",
+				"id":             testSPID1,
+				fieldDisplayName: "Test Service Principal",
+				fieldType:        servicePrincipalType,
+				fieldAppID:       "sp-app-id-1",
 			},
 		},
 		"PlainDirectoryObjectUsesAdditionalDataFallback": {
 			reason: "A plain directory object should fall back to additionalData for user properties",
 			member: newTestDirectoryObject(),
 			want: map[string]interface{}{
-				"id":                "user-id-2",
-				"displayName":       "Fallback User",
-				"type":              "user",
-				"mail":              "user2@example.com",
-				"userPrincipalName": "user2@example.com",
+				"id":                   "user-id-2",
+				fieldDisplayName:       "Fallback User",
+				fieldType:              userType,
+				fieldMail:              testUser2Email,
+				fieldUserPrincipalName: testUser2Email,
 			},
 		},
 	}
