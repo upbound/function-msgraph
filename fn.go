@@ -66,9 +66,12 @@ const (
 const (
 	// Microsoft Graph field names used in query projections ($select) and in the
 	// maps returned for query results.
-	fieldDisplayName = "displayName"
-	fieldAppID       = "appId"
-	fieldDescription = "description"
+	fieldDisplayName       = "displayName"
+	fieldAppID             = "appId"
+	fieldDescription       = "description"
+	fieldMail              = "mail"
+	fieldUserPrincipalName = "userPrincipalName"
+	fieldType              = "type"
 )
 
 // GraphQueryInterface defines the methods required for querying Microsoft Graph API.
@@ -534,7 +537,7 @@ func (g *GraphQuery) validateUsers(ctx context.Context, client *msgraphsdk.Graph
 		requestConfig.QueryParameters.Filter = &filterValue
 
 		// Use standard fields for user validation
-		requestConfig.QueryParameters.Select = []string{"id", fieldDisplayName, "userPrincipalName", "mail"}
+		requestConfig.QueryParameters.Select = []string{"id", fieldDisplayName, fieldUserPrincipalName, fieldMail}
 
 		// Execute the query
 		result, err := client.Users().Get(ctx, requestConfig)
@@ -546,10 +549,10 @@ func (g *GraphQuery) validateUsers(ctx context.Context, client *msgraphsdk.Graph
 		if result.GetValue() != nil {
 			for _, user := range result.GetValue() {
 				userMap := map[string]interface{}{
-					"id":                ptr.Deref(user.GetId(), ""),
-					fieldDisplayName:    ptr.Deref(user.GetDisplayName(), ""),
-					"userPrincipalName": ptr.Deref(user.GetUserPrincipalName(), ""),
-					"mail":              ptr.Deref(user.GetMail(), ""),
+					"id":                   ptr.Deref(user.GetId(), ""),
+					fieldDisplayName:       ptr.Deref(user.GetDisplayName(), ""),
+					fieldUserPrincipalName: ptr.Deref(user.GetUserPrincipalName(), ""),
+					fieldMail:              ptr.Deref(user.GetMail(), ""),
 				}
 				results = append(results, userMap)
 			}
@@ -665,22 +668,22 @@ func (g *GraphQuery) extractStringProperty(additionalData map[string]interface{}
 func (g *GraphQuery) extractUserProperties(member models.DirectoryObjectable, additionalData map[string]interface{}, memberMap map[string]interface{}) {
 	if user, ok := member.(models.Userable); ok {
 		if mail := ptr.Deref(user.GetMail(), ""); mail != "" {
-			memberMap["mail"] = mail
+			memberMap[fieldMail] = mail
 		}
 		if upn := ptr.Deref(user.GetUserPrincipalName(), ""); upn != "" {
-			memberMap["userPrincipalName"] = upn
+			memberMap[fieldUserPrincipalName] = upn
 		}
 	}
 
 	// Fall back to additionalData when the typed getters did not provide a value.
-	if _, ok := memberMap["mail"]; !ok {
-		if mail, found := g.extractStringProperty(additionalData, "mail"); found {
-			memberMap["mail"] = mail
+	if _, ok := memberMap[fieldMail]; !ok {
+		if mail, found := g.extractStringProperty(additionalData, fieldMail); found {
+			memberMap[fieldMail] = mail
 		}
 	}
-	if _, ok := memberMap["userPrincipalName"]; !ok {
-		if upn, found := g.extractStringProperty(additionalData, "userPrincipalName"); found {
-			memberMap["userPrincipalName"] = upn
+	if _, ok := memberMap[fieldUserPrincipalName]; !ok {
+		if upn, found := g.extractStringProperty(additionalData, fieldUserPrincipalName); found {
+			memberMap[fieldUserPrincipalName] = upn
 		}
 	}
 }
@@ -723,8 +726,8 @@ func (g *GraphQuery) processMember(member models.DirectoryObjectable) map[string
 	memberType := unknownType
 
 	// Check properties that indicate user type
-	_, hasUserPrincipalName := g.extractStringProperty(additionalData, "userPrincipalName")
-	_, hasMail := g.extractStringProperty(additionalData, "mail")
+	_, hasUserPrincipalName := g.extractStringProperty(additionalData, fieldUserPrincipalName)
+	_, hasMail := g.extractStringProperty(additionalData, fieldMail)
 	if hasUserPrincipalName || hasMail {
 		memberType = userType
 	}
@@ -744,7 +747,7 @@ func (g *GraphQuery) processMember(member models.DirectoryObjectable) map[string
 	}
 
 	// Add type to member info
-	memberMap["type"] = memberType
+	memberMap[fieldType] = memberType
 
 	// Extract display name
 	memberMap[fieldDisplayName] = g.extractDisplayName(member, memberID)
