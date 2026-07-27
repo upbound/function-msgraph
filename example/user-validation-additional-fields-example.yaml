@@ -1,0 +1,49 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: user-validation-additional-fields-example
+# Demonstrates the additionalFields feature for UserValidation.
+# The extra fields are appended to the default set (id, displayName,
+# userPrincipalName, mail) and returned in status.validatedUsers.
+#
+# Required Azure AD app registration permissions:
+#   - User.Read.All
+#   - Directory.Read.All
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1
+    kind: XR
+  mode: Pipeline
+  pipeline:
+    - step: validate-user-with-extra-fields
+      functionRef:
+        name: function-msgraph
+      input:
+        apiVersion: msgraph.fn.crossplane.io/v1alpha1
+        kind: Input
+        queryType: UserValidation
+        # Replace with actual user principal names from your directory
+        users:
+          - "user@example.onmicrosoft.com"
+        target: "status.validatedUsers"
+        skipQueryWhenTargetHasData: true
+        # Extra Microsoft Graph user properties to include in the result.
+        # These are appended to the default fields: id, displayName,
+        # userPrincipalName, mail.
+        # Supported values: any standard Graph user property (camelCase)
+        # or OData extension attribute (e.g. extension_<appId>_<name>).
+        # If a field has no value set in Entra ID it is silently omitted
+        # from the result (Debug log emitted). If the field name is wrong
+        # an Info log is emitted and the field is omitted.
+        additionalFields:
+          - city
+          - country
+          - department
+          - jobTitle
+          - usageLocation
+      credentials:
+        - name: azure-creds
+          source: Secret
+          secretRef:
+            namespace: crossplane-system
+            name: azure-account-creds

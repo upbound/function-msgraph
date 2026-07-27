@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -81,6 +82,209 @@ const (
 	servicePrincipalType = "servicePrincipal"
 	unknownType          = "unknown"
 )
+
+// graphFieldNameRE matches the shape of a Microsoft Graph property name,
+// including OData extension attributes (extension_<appId>_<name>).
+var graphFieldNameRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
+
+// normalizeGraphValue converts a value resolved from a Graph SDK model into a
+// JSON-safe representation. Both result targets require this: status targets are
+// serialized with encoding/json, and kiota model structs keep their state in an
+// unexported backing store, so they would marshal to an empty object; context
+// targets go through structpb.NewValue, which rejects anything that is not a
+// JSON scalar, map[string]interface{} or []interface{}.
+// The second return value is false when the value cannot be represented.
+func normalizeGraphValue(v interface{}) (interface{}, bool) { //nolint:gocyclo // multiple type cases are inherent to value normalisation
+	switch t := v.(type) {
+	case nil:
+		return nil, false
+	case string, bool, int, int32, int64, float32, float64:
+		return t, true
+	case []byte:
+		return base64.StdEncoding.EncodeToString(t), true
+	case time.Time:
+		return t.Format(time.RFC3339), true
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(t))
+		for k, e := range t {
+			if nv, ok := normalizeGraphValue(e); ok {
+				out[k] = nv
+			}
+		}
+		return out, true
+	}
+
+	rv := reflect.ValueOf(v)
+	// Dereference first so that, for example, *time.Time reaches the case above.
+	if rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return nil, false
+		}
+		return normalizeGraphValue(rv.Elem().Interface())
+	}
+	// Graph enums and identifier types (uuid.UUID and friends) render as strings.
+	if s, ok := v.(fmt.Stringer); ok {
+		return s.String(), true
+	}
+	if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
+		out := make([]interface{}, 0, rv.Len())
+		for i := range rv.Len() {
+			if nv, ok := normalizeGraphValue(rv.Index(i).Interface()); ok {
+				out = append(out, nv)
+			}
+		}
+		return out, true
+	}
+
+	return nil, false
+}
+
+// callTypedGetter invokes a no-argument getter method on obj by reflection.
+// Returns (value, found, hasGetter):
+//   - hasGetter=false: no method with the expected name/signature exists.
+//   - hasGetter=true, found=false: method exists but returned nil/zero (field not set).
+//   - hasGetter=true, found=true: method returned a non-nil/non-zero value.
+func callTypedGetter(obj interface{}, methodName string) (interface{}, bool, bool) {
+	m := reflect.ValueOf(obj).MethodByName(methodName)
+	if !m.IsValid() || m.Type().NumIn() != 0 || m.Type().NumOut() != 1 {
+		return nil, false, false
+	}
+	rv := m.Call(nil)[0]
+	if rv.Kind() == reflect.Pointer && !rv.IsNil() {
+		return rv.Elem().Interface(), true, true
+	}
+	if rv.IsValid() && !rv.IsZero() {
+		return rv.Interface(), true, true
+	}
+	return nil, false, true
+}
+
+// lookupAdditionalData checks whether field is present in the object's OData
+// additional data bag (used for extension attributes not modelled as typed fields).
+func lookupAdditionalData(obj interface{}, field string) (interface{}, bool) {
+	type additionalDataProvider interface {
+		GetAdditionalData() map[string]interface{}
+	}
+	if adder, ok := obj.(additionalDataProvider); ok {
+		val, exists := adder.GetAdditionalData()[field]
+		return val, exists
+	}
+	return nil, false
+}
+
+// filterSelectFields returns the subset of additionalFields that are safe to
+// include in a Graph API $select expression. A field is accepted when it
+// either has a typed getter on modelPtr (checked by reflection) or matches
+// the OData extension-attribute naming convention (extension_*). Rejected
+// fields are logged at Info level and omitted so that Graph never returns a
+// 400 for an unrecognised property name.
+func (g *GraphQuery) filterSelectFields(additionalFields []string, modelPtr interface{}) []string {
+	if len(additionalFields) == 0 {
+		return nil
+	}
+	t := reflect.TypeOf(modelPtr)
+	out := make([]string, 0, len(additionalFields))
+	for _, field := range additionalFields {
+		if len(field) == 0 {
+			continue
+		}
+		methodName := "Get" + strings.ToUpper(field[:1]) + field[1:]
+		if _, ok := t.MethodByName(methodName); ok {
+			out = append(out, field)
+			continue
+		}
+		if strings.HasPrefix(field, "extension_") {
+			out = append(out, field)
+			continue
+		}
+		if g.log != nil {
+			g.log.Info("additionalFields: field not recognised — verify the field name; skipping to prevent Graph API 400",
+				"field", field, "model", t.String())
+		}
+	}
+	return out
+}
+
+// sanitizeAdditionalFields drops entries that are not valid Graph property
+// names. Names are interpolated into OData $select and $expand expressions, so
+// an unvalidated entry can inject extra query options or produce a malformed
+// expression that Graph rejects with 400.
+func (g *GraphQuery) sanitizeAdditionalFields(fields []string) []string {
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if !graphFieldNameRE.MatchString(f) {
+			if g.log != nil {
+				g.log.Info("additionalFields: ignoring invalid Graph property name", "field", f)
+			}
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// applyAdditionalFields extracts each requested field from obj and stores
+// found values in m. It is a convenience wrapper around extractTypedOrAdditionalField.
+func (g *GraphQuery) applyAdditionalFields(m map[string]interface{}, obj interface{}, objectID string, fields []string) {
+	for _, field := range fields {
+		val, ok := g.extractTypedOrAdditionalField(obj, field, objectID)
+		if !ok {
+			continue
+		}
+		normalized, ok := normalizeGraphValue(val)
+		if !ok {
+			// Structured Graph types have no faithful JSON-safe form here. Skipping
+			// with a log is preferable to writing an empty object to the target.
+			if g.log != nil {
+				g.log.Info("additionalFields: field has a complex type that cannot be stored at the target, skipping",
+					"field", field, "objectID", objectID, "type", fmt.Sprintf("%T", val))
+			}
+			continue
+		}
+		m[field] = normalized
+	}
+}
+
+// extractTypedOrAdditionalField resolves a field value from a Microsoft Graph
+// SDK model object. It first attempts to call the typed getter derived from
+// the field name (e.g. "city" → GetCity(), "jobTitle" → GetJobTitle()) using
+// reflection. This is necessary because the kiota-generated SDK deserializes
+// known properties into typed struct fields, not into GetAdditionalData().
+// If no typed getter exists (e.g. for OData extension attributes), the
+// method falls back to GetAdditionalData().
+//
+// Logging behaviour:
+//   - Debug: field is a known SDK property but has no value set for this object
+//     (e.g. user.city is empty in Entra ID) — expected, no action needed.
+//   - Info:  field is not found via typed getter OR additionalData — likely a
+//     typo or unsupported field name in additionalFields config.
+func (g *GraphQuery) extractTypedOrAdditionalField(obj interface{}, field, objectID string) (interface{}, bool) {
+	if len(field) == 0 {
+		return nil, false
+	}
+	// Build the expected getter name: "city" → "GetCity", "jobTitle" → "GetJobTitle"
+	methodName := "Get" + strings.ToUpper(field[:1]) + field[1:]
+	if val, found, hasGetter := callTypedGetter(obj, methodName); hasGetter {
+		if found {
+			return val, true
+		}
+		// Typed getter exists but returned nil/zero — field is known but not set.
+		if g.log != nil {
+			g.log.Debug("additionalFields: field is a valid Graph property but has no value for this object",
+				"field", field, "objectID", objectID)
+		}
+		return nil, false
+	}
+	if val, found := lookupAdditionalData(obj, field); found {
+		return val, true
+	}
+	// Field not found anywhere — likely a typo or unsupported field name.
+	if g.log != nil {
+		g.log.Info("additionalFields: field not found in Graph SDK model or additionalData — verify the field name in additionalFields config",
+			"field", field, "objectID", objectID)
+	}
+	return nil, false
+}
 
 // GraphQueryInterface defines the methods required for querying Microsoft Graph API.
 type GraphQueryInterface interface {
@@ -507,6 +711,8 @@ func (g *GraphQuery) graphQuery(ctx context.Context, azureCreds map[string]strin
 		return nil, err
 	}
 
+	in.AdditionalFields = g.sanitizeAdditionalFields(in.AdditionalFields)
+
 	// Route based on query type
 	switch in.QueryType {
 	case "UserValidation":
@@ -530,6 +736,7 @@ func (g *GraphQuery) validateUsers(ctx context.Context, client *msgraphsdk.Graph
 
 	results := make([]interface{}, 0)
 	requireActiveAccount := ptr.Deref(in.ActiveAccount, false)
+	validExtra := g.filterSelectFields(in.AdditionalFields, (*models.User)(nil))
 
 	for _, userPrincipalName := range in.Users {
 		if userPrincipalName == nil {
@@ -545,9 +752,12 @@ func (g *GraphQuery) validateUsers(ctx context.Context, client *msgraphsdk.Graph
 		filterValue := fmt.Sprintf("userPrincipalName eq '%s'", *userPrincipalName)
 		requestConfig.QueryParameters.Filter = &filterValue
 
-		// Use standard fields for user validation. accountEnabled is returned by
-		// Microsoft Graph only when it is explicitly selected.
-		requestConfig.QueryParameters.Select = []string{"id", fieldDisplayName, fieldUserPrincipalName, fieldMail, fieldAccountEnabled}
+		// Use standard fields for user validation, appending any extra fields requested.
+		// accountEnabled is returned by Microsoft Graph only when explicitly selected.
+		selectFields := make([]string, 0, 5+len(validExtra))
+		selectFields = append(selectFields, "id", fieldDisplayName, fieldUserPrincipalName, fieldMail, fieldAccountEnabled)
+		selectFields = append(selectFields, validExtra...)
+		requestConfig.QueryParameters.Select = selectFields
 
 		// Execute the query
 		result, err := client.Users().Get(ctx, requestConfig)
@@ -556,7 +766,7 @@ func (g *GraphQuery) validateUsers(ctx context.Context, client *msgraphsdk.Graph
 		}
 
 		// Process results
-		results = append(results, g.buildUserResults(result.GetValue(), requireActiveAccount)...)
+		results = append(results, g.buildUserResults(result.GetValue(), requireActiveAccount, validExtra)...)
 	}
 
 	return results, nil
@@ -567,7 +777,7 @@ func (g *GraphQuery) validateUsers(ctx context.Context, client *msgraphsdk.Graph
 // attribute is not true are omitted. A nil attribute is treated as disabled,
 // because Microsoft Graph returns accountEnabled only when it is explicitly
 // selected, so an absent value means the account state is unconfirmed.
-func (g *GraphQuery) buildUserResults(graphUsers []models.Userable, requireActiveAccount bool) []interface{} {
+func (g *GraphQuery) buildUserResults(graphUsers []models.Userable, requireActiveAccount bool, additionalFields []string) []interface{} {
 	results := make([]interface{}, 0, len(graphUsers))
 
 	for _, user := range graphUsers {
@@ -582,13 +792,15 @@ func (g *GraphQuery) buildUserResults(graphUsers []models.Userable, requireActiv
 			continue
 		}
 
-		results = append(results, map[string]interface{}{
+		userMap := map[string]interface{}{
 			"id":                   ptr.Deref(user.GetId(), ""),
 			fieldDisplayName:       ptr.Deref(user.GetDisplayName(), ""),
 			fieldUserPrincipalName: ptr.Deref(user.GetUserPrincipalName(), ""),
 			fieldMail:              ptr.Deref(user.GetMail(), ""),
 			fieldAccountEnabled:    accountEnabled,
-		})
+		}
+		g.applyAdditionalFields(userMap, user, ptr.Deref(user.GetId(), "unknown"), additionalFields)
+		results = append(results, userMap)
 	}
 
 	return results
@@ -619,18 +831,23 @@ func (g *GraphQuery) findGroupByName(ctx context.Context, client *msgraphsdk.Gra
 	return groupResult.GetValue()[0].GetId(), nil
 }
 
-// fetchGroupMembers fetches all members of a group by group ID
-func (g *GraphQuery) fetchGroupMembers(ctx context.Context, client *msgraphsdk.GraphServiceClient, groupID string, groupName string) ([]models.DirectoryObjectable, error) {
-	// Create a request configuration that expands members
-	// This is the workaround for the known issue where service principals
-	// are not listed as group members in v1.0
+// fetchGroupMembers fetches all members of a group by group ID.
+// additionalFields extends the nested $select inside the $expand expression.
+func (g *GraphQuery) fetchGroupMembers(ctx context.Context, client *msgraphsdk.GraphServiceClient, groupID string, groupName string, additionalFields []string) ([]models.DirectoryObjectable, error) {
+	// Build the nested $select list for the $expand workaround.
+	// The workaround is required because service principals are not listed as
+	// group members via the standard /members endpoint in v1.0.
 	// See: https://developer.microsoft.com/en-us/graph/known-issues/?search=25984
+	memberSelectFields := append(
+		[]string{"id", "displayName", "mail", "userPrincipalName", "appId"},
+		additionalFields...,
+	)
 	requestConfig := &groups.GroupItemRequestBuilderGetRequestConfiguration{
 		QueryParameters: &groups.GroupItemRequestBuilderGetQueryParameters{
-			// Explicitly select the standard member fields via a nested $select so
-			// that user properties such as mail and userPrincipalName are returned
-			// for the expanded members (see issue #115).
-			Expand: []string{"members($select=id,displayName,mail,userPrincipalName,appId)"},
+			// Explicitly select member fields via a nested $select so that user
+			// properties such as mail and userPrincipalName are returned for the
+			// expanded members (see issue #115).
+			Expand: []string{fmt.Sprintf("members($select=%s)", strings.Join(memberSelectFields, ","))},
 		},
 	}
 
@@ -806,16 +1023,22 @@ func (g *GraphQuery) getGroupMembers(ctx context.Context, client *msgraphsdk.Gra
 		return nil, err
 	}
 
-	// Fetch the members
-	memberObjects, err := g.fetchGroupMembers(ctx, client, *groupID, groupName)
+	// Filter additionalFields up front so the nested $select never gets an
+	// unrecognised property name (which would cause Graph to return 400).
+	// Members are predominantly users, so we validate against models.User.
+	validExtra := g.filterSelectFields(in.AdditionalFields, (*models.User)(nil))
+
+	// Fetch the members, forwarding any extra fields for the nested $select
+	memberObjects, err := g.fetchGroupMembers(ctx, client, *groupID, groupName, validExtra)
 	if err != nil {
 		return nil, err
 	}
 
-	// Process the members
+	// Process the members and attach any additional fields from additionalData
 	members := make([]interface{}, 0, len(memberObjects))
 	for _, member := range memberObjects {
 		memberMap := g.processMember(member)
+		g.applyAdditionalFields(memberMap, member, ptr.Deref(member.GetId(), "unknown"), validExtra)
 		members = append(members, memberMap)
 	}
 
@@ -829,6 +1052,7 @@ func (g *GraphQuery) getGroupObjectIDs(ctx context.Context, client *msgraphsdk.G
 	}
 
 	results := make([]interface{}, 0)
+	validExtra := g.filterSelectFields(in.AdditionalFields, (*models.Group)(nil))
 
 	for _, groupName := range in.Groups {
 		if groupName == nil {
@@ -844,8 +1068,11 @@ func (g *GraphQuery) getGroupObjectIDs(ctx context.Context, client *msgraphsdk.G
 		filterValue := fmt.Sprintf("displayName eq '%s'", *groupName)
 		requestConfig.QueryParameters.Filter = &filterValue
 
-		// Use standard fields for group object IDs
-		requestConfig.QueryParameters.Select = []string{"id", fieldDisplayName, fieldDescription}
+		// Use standard fields for group object IDs, appending any extra fields requested
+		selectFields := make([]string, 0, 3+len(validExtra))
+		selectFields = append(selectFields, "id", fieldDisplayName, fieldDescription)
+		selectFields = append(selectFields, validExtra...)
+		requestConfig.QueryParameters.Select = selectFields
 
 		groupResult, err := client.Groups().Get(ctx, requestConfig)
 		if err != nil {
@@ -859,6 +1086,7 @@ func (g *GraphQuery) getGroupObjectIDs(ctx context.Context, client *msgraphsdk.G
 					fieldDisplayName: ptr.Deref(group.GetDisplayName(), ""),
 					fieldDescription: ptr.Deref(group.GetDescription(), ""),
 				}
+				g.applyAdditionalFields(groupMap, group, ptr.Deref(group.GetId(), "unknown"), validExtra)
 				results = append(results, groupMap)
 			}
 		}
@@ -874,6 +1102,7 @@ func (g *GraphQuery) getServicePrincipalDetails(ctx context.Context, client *msg
 	}
 
 	results := make([]interface{}, 0)
+	validExtra := g.filterSelectFields(in.AdditionalFields, (*models.ServicePrincipal)(nil))
 
 	for _, spName := range in.ServicePrincipals {
 		if spName == nil {
@@ -889,8 +1118,11 @@ func (g *GraphQuery) getServicePrincipalDetails(ctx context.Context, client *msg
 		filterValue := fmt.Sprintf("displayName eq '%s'", *spName)
 		requestConfig.QueryParameters.Filter = &filterValue
 
-		// Use standard fields for service principals
-		requestConfig.QueryParameters.Select = []string{"id", fieldAppID, fieldDisplayName, fieldDescription}
+		// Use standard fields for service principals, appending any extra fields requested
+		selectFields := make([]string, 0, 4+len(validExtra))
+		selectFields = append(selectFields, "id", fieldAppID, fieldDisplayName, fieldDescription)
+		selectFields = append(selectFields, validExtra...)
+		requestConfig.QueryParameters.Select = selectFields
 
 		spResult, err := client.ServicePrincipals().Get(ctx, requestConfig)
 		if err != nil {
@@ -905,6 +1137,7 @@ func (g *GraphQuery) getServicePrincipalDetails(ctx context.Context, client *msg
 					fieldDisplayName: ptr.Deref(sp.GetDisplayName(), ""),
 					fieldDescription: ptr.Deref(sp.GetDescription(), ""),
 				}
+				g.applyAdditionalFields(spMap, sp, ptr.Deref(sp.GetId(), "unknown"), validExtra)
 				results = append(results, spMap)
 			}
 		}

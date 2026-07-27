@@ -106,6 +106,11 @@ func (in *Input) DeepCopyInto(out *Input) {
 		*out = new(bool)
 		**out = **in
 	}
+	if in.AdditionalFields != nil {
+		in, out := &in.AdditionalFields, &out.AdditionalFields
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Identity != nil {
 		in, out := &in.Identity, &out.Identity
 		*out = new(Identity)

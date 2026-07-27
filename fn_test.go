@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -22,15 +23,19 @@ import (
 
 const (
 	// Repeated fixture values used across the table-driven tests.
-	testRequestTag     = "hello"
-	testCredentialsKey = "credentials"
-	testAzureCredsName = "azure-creds"
-	testSPID1          = "sp-id-1"
-	testUserID1        = "user-id-1"
-	testUserDisplay    = "Test User"
-	testUser1Email     = "user1@example.com"
-	testUser2Email     = "user2@example.com"
-	watchedResourceKey = "ops.crossplane.io/watched-resource"
+	testRequestTag      = "hello"
+	testCredentialsKey  = "credentials"
+	testAzureCredsName  = "azure-creds"
+	testSPID1           = "sp-id-1"
+	testUserID1         = "user-id-1"
+	testUserIDDefault   = "test-user-id"
+	testUserDisplay     = "Test User"
+	testUser1Email      = "user1@example.com"
+	testUser2Email      = "user2@example.com"
+	testExampleEmail    = "user@example.com"
+	testFieldCity       = "city"
+	testFieldDepartment = "department"
+	watchedResourceKey  = "ops.crossplane.io/watched-resource"
 
 	// Condition fields asserted on successful function responses.
 	condTypeFunctionSuccess = "FunctionSuccess"
@@ -1597,7 +1602,7 @@ func TestResolveUsersRef(t *testing.T) {
 								userID = "admin-id"
 								displayName = "Admin User"
 							default:
-								userID = "test-user-id"
+								userID = testUserIDDefault
 								displayName = testUserDisplay
 							}
 
@@ -3990,7 +3995,7 @@ func TestRunFunction(t *testing.T) {
 							// and the remaining one carries accountEnabled.
 							return []interface{}{
 								map[string]interface{}{
-									"id":                   "test-user-id",
+									"id":                   testUserIDDefault,
 									fieldDisplayName:       testUserDisplay,
 									fieldUserPrincipalName: "user@example.com",
 									fieldMail:              "user@example.com",
@@ -4000,7 +4005,7 @@ func TestRunFunction(t *testing.T) {
 						}
 						return []interface{}{
 							map[string]interface{}{
-								"id":                   "test-user-id",
+								"id":                   testUserIDDefault,
 								fieldDisplayName:       testUserDisplay,
 								fieldUserPrincipalName: "user@example.com",
 								fieldMail:              "user@example.com",
@@ -4294,6 +4299,253 @@ func TestIdentityType(t *testing.T) {
 	}
 }
 
+// TestAdditionalFields verifies that AdditionalFields is propagated to the graph
+// query and that extra fields appear in the RunFunction response for every
+// supported queryType (UserValidation, GroupObjectIDs, ServicePrincipalDetails,
+// GroupMembership).
+func TestAdditionalFields(t *testing.T) {
+	xr := `{"apiVersion":"example.org/v1","kind":"XR","metadata":{"name":"cool-xr"},"spec":{"count":2}}`
+	creds := &fnv1.CredentialData{
+		Data: map[string][]byte{
+			testCredentialsKey: []byte(`{
+"clientId": "test-client-id",
+"clientSecret": "test-client-secret",
+"subscriptionId": "test-subscription-id",
+"tenantId": "test-tenant-id"
+}`),
+		},
+	}
+
+	cases := map[string]struct {
+		reason            string
+		inputJSON         string
+		wantExtraFields   []string
+		wantStatusPayload string
+		// mockResult is the value the mock graphQuery returns for this case
+		mockResult func(in *v1beta1.Input) (interface{}, error)
+	}{
+		// ── UserValidation ────────────────────────────────────────────────────────
+		"UserValidationWithAdditionalFields": {
+			reason: "additionalFields must be forwarded and appear in UserValidation results",
+			inputJSON: `{
+				"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+				"kind": "Input",
+				"queryType": "UserValidation",
+				"users": ["user@example.com"],
+				"target": "status.validatedUsers",
+				"additionalFields": ["city", "department"]
+			}`,
+			wantExtraFields: []string{testFieldCity, testFieldDepartment},
+			wantStatusPayload: `{"validatedUsers":[{
+				"id":"test-user-id","displayName":"Test User",
+				"userPrincipalName":"user@example.com","mail":"user@example.com",
+				"city":"Kyiv","department":"Tech Ops"
+			}]}`,
+			mockResult: func(in *v1beta1.Input) (interface{}, error) {
+				m := map[string]interface{}{
+					"id": testUserIDDefault, fieldDisplayName: testUserDisplay,
+					fieldUserPrincipalName: testExampleEmail, fieldMail: testExampleEmail,
+				}
+				for _, f := range in.AdditionalFields {
+					switch f {
+					case testFieldCity:
+						m[testFieldCity] = "Kyiv"
+					case testFieldDepartment:
+						m[testFieldDepartment] = "Tech Ops"
+					}
+				}
+				return []interface{}{m}, nil
+			},
+		},
+		"UserValidationBackwardCompat": {
+			reason: "omitting additionalFields must yield only the default four fields",
+			inputJSON: `{
+				"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+				"kind": "Input",
+				"queryType": "UserValidation",
+				"users": ["user@example.com"],
+				"target": "status.validatedUsers"
+			}`,
+			wantExtraFields: nil,
+			wantStatusPayload: `{"validatedUsers":[{
+				"id":"test-user-id","displayName":"Test User",
+				"userPrincipalName":"user@example.com","mail":"user@example.com"
+			}]}`,
+			mockResult: func(_ *v1beta1.Input) (interface{}, error) {
+				return []interface{}{map[string]interface{}{
+					"id": testUserIDDefault, fieldDisplayName: testUserDisplay,
+					fieldUserPrincipalName: testExampleEmail, fieldMail: testExampleEmail,
+				}}, nil
+			},
+		},
+		// ── GroupObjectIDs ───────────────────────────────────────────────────────
+		"GroupObjectIDsWithAdditionalFields": {
+			reason: "additionalFields must be forwarded and appear in GroupObjectIDs results",
+			inputJSON: `{
+				"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+				"kind": "Input",
+				"queryType": "GroupObjectIDs",
+				"groups": ["Developers"],
+				"target": "status.groupObjectIDs",
+				"additionalFields": ["mailNickname", "visibility"]
+			}`,
+			wantExtraFields: []string{"mailNickname", "visibility"},
+			wantStatusPayload: `{"groupObjectIDs":[{
+				"id":"group-id-1","displayName":"Developers","description":"Dev team",
+				"mailNickname":"devs","visibility":"Private"
+			}]}`,
+			mockResult: func(in *v1beta1.Input) (interface{}, error) {
+				m := map[string]interface{}{
+					"id": "group-id-1", fieldDisplayName: "Developers", fieldDescription: "Dev team",
+				}
+				for _, f := range in.AdditionalFields {
+					switch f {
+					case "mailNickname":
+						m["mailNickname"] = "devs"
+					case "visibility":
+						m["visibility"] = "Private"
+					}
+				}
+				return []interface{}{m}, nil
+			},
+		},
+		// ── ServicePrincipalDetails ──────────────────────────────────────────────
+		"ServicePrincipalDetailsWithAdditionalFields": {
+			reason: "additionalFields must be forwarded and appear in ServicePrincipalDetails results",
+			inputJSON: `{
+				"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+				"kind": "Input",
+				"queryType": "ServicePrincipalDetails",
+				"servicePrincipals": ["MyApp"],
+				"target": "status.spDetails",
+				"additionalFields": ["servicePrincipalType", "homepage"]
+			}`,
+			wantExtraFields: []string{"servicePrincipalType", "homepage"},
+			wantStatusPayload: `{"spDetails":[{
+				"id":"sp-id-1","appId":"app-id-1","displayName":"MyApp","description":"",
+				"servicePrincipalType":"Application","homepage":"https://myapp.example.com"
+			}]}`,
+			mockResult: func(in *v1beta1.Input) (interface{}, error) {
+				m := map[string]interface{}{
+					"id": "sp-id-1", fieldAppID: "app-id-1",
+					fieldDisplayName: "MyApp", fieldDescription: "",
+				}
+				for _, f := range in.AdditionalFields {
+					switch f {
+					case "servicePrincipalType":
+						m["servicePrincipalType"] = "Application"
+					case "homepage":
+						m["homepage"] = "https://myapp.example.com"
+					}
+				}
+				return []interface{}{m}, nil
+			},
+		},
+		// ── GroupMembership ──────────────────────────────────────────────────────
+		"GroupMembershipWithAdditionalFields": {
+			reason: "additionalFields must be forwarded and appear in GroupMembership member results",
+			inputJSON: `{
+				"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+				"kind": "Input",
+				"queryType": "GroupMembership",
+				"group": "Developers",
+				"target": "status.members",
+				"additionalFields": ["department", "jobTitle"]
+			}`,
+			wantExtraFields: []string{testFieldDepartment, "jobTitle"},
+			wantStatusPayload: `{"members":[{
+				"id":"user-id-1","displayName":"Test User","type":"user",
+				"mail":"user1@example.com","userPrincipalName":"user1@example.com",
+				"department":"Engineering","jobTitle":"Staff Engineer"
+			}]}`,
+			mockResult: func(in *v1beta1.Input) (interface{}, error) {
+				m := map[string]interface{}{
+					"id": testUserID1, fieldDisplayName: testUserDisplay, fieldType: userType,
+					fieldMail: testUser1Email, fieldUserPrincipalName: testUser1Email,
+				}
+				for _, f := range in.AdditionalFields {
+					switch f {
+					case testFieldDepartment:
+						m[testFieldDepartment] = "Engineering"
+					case "jobTitle":
+						m["jobTitle"] = "Staff Engineer"
+					}
+				}
+				return []interface{}{m}, nil
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var capturedAdditionalFields []string
+
+			mockQuery := &MockGraphQuery{
+				GraphQueryFunc: func(_ context.Context, _ map[string]string, in *v1beta1.Input) (interface{}, error) {
+					capturedAdditionalFields = in.AdditionalFields
+					return tc.mockResult(in)
+				},
+			}
+
+			f := &Function{
+				graphQuery: mockQuery,
+				timer:      &MockTimer{},
+				log:        logging.NewNopLogger(),
+			}
+
+			req := &fnv1.RunFunctionRequest{
+				Meta:  &fnv1.RequestMeta{Tag: testRequestTag},
+				Input: resource.MustStructJSON(tc.inputJSON),
+				Observed: &fnv1.State{
+					Composite: &fnv1.Resource{
+						Resource: resource.MustStructJSON(xr),
+					},
+				},
+				Credentials: map[string]*fnv1.Credentials{
+					testAzureCredsName: {
+						Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+					},
+				},
+			}
+
+			rsp, err := f.RunFunction(context.Background(), req)
+			if err != nil {
+				t.Fatalf("%s: unexpected error: %v", tc.reason, err)
+			}
+
+			// AdditionalFields must be forwarded to the mock as-is.
+			if diff := cmp.Diff(tc.wantExtraFields, capturedAdditionalFields, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("%s\nAdditionalFields forwarded to query: -want +got:\n%s", tc.reason, diff)
+			}
+
+			// FunctionSuccess condition must be true.
+			var successCond *fnv1.Condition
+			for _, c := range rsp.GetConditions() {
+				if c.GetType() == condTypeFunctionSuccess {
+					successCond = c
+					break
+				}
+			}
+			if successCond == nil || successCond.GetStatus() != fnv1.Status_STATUS_CONDITION_TRUE {
+				t.Errorf("%s: expected FunctionSuccess=True condition, got: %v", tc.reason, rsp.GetConditions())
+			}
+
+			// Desired XR status must match expected payload.
+			wantDesired := resource.MustStructJSON(`{
+				"apiVersion": "example.org/v1",
+				"kind": "XR",
+				"metadata": {"name": "cool-xr"},
+				"spec": {"count": 2},
+				"status": ` + tc.wantStatusPayload + `
+			}`)
+			gotDesired := rsp.GetDesired().GetComposite().GetResource()
+			if diff := cmp.Diff(wantDesired, gotDesired, protocmp.Transform()); diff != "" {
+				t.Errorf("%s\ndesired XR: -want +got:\n%s", tc.reason, diff)
+			}
+		})
+	}
+}
+
 // newTestUser builds a typed user directory object, mirroring how the Graph SDK
 // deserializes expanded group members (the values land on the typed struct, not
 // in additionalData).
@@ -4382,6 +4634,7 @@ func TestBuildUserResults(t *testing.T) {
 		reason               string
 		graphUsers           []models.Userable
 		requireActiveAccount bool
+		additionalFields     []string
 		want                 []interface{}
 	}{
 		"FlagOffKeepsDisabledUsers": {
@@ -4479,17 +4732,261 @@ func TestBuildUserResults(t *testing.T) {
 				},
 			},
 		},
+		"AdditionalFieldsTypedScalar": {
+			reason: "A typed scalar additional field (city) is extracted and returned as a string",
+			graphUsers: func() []models.Userable {
+				u := models.NewUser()
+				u.SetId(ptr.To(testUserID1))
+				u.SetUserPrincipalName(ptr.To(testUser1Email))
+				u.SetMail(ptr.To(testUser1Email))
+				u.SetDisplayName(ptr.To(testUserDisplay))
+				u.SetAccountEnabled(ptr.To(true))
+				u.SetCity(ptr.To("Kyiv"))
+				return []models.Userable{u}
+			}(),
+			requireActiveAccount: false,
+			additionalFields:     []string{testFieldCity},
+			want: []interface{}{
+				map[string]interface{}{
+					"id":                   testUserID1,
+					fieldDisplayName:       testUserDisplay,
+					fieldUserPrincipalName: testUser1Email,
+					fieldMail:              testUser1Email,
+					fieldAccountEnabled:    true,
+					testFieldCity:          "Kyiv",
+				},
+			},
+		},
+		"AdditionalFieldsNonScalarSlice": {
+			reason: "A []string field (businessPhones) is normalised to []interface{} so it can be serialised",
+			graphUsers: func() []models.Userable {
+				u := models.NewUser()
+				u.SetId(ptr.To(testUserID1))
+				u.SetUserPrincipalName(ptr.To(testUser1Email))
+				u.SetMail(ptr.To(testUser1Email))
+				u.SetDisplayName(ptr.To(testUserDisplay))
+				u.SetAccountEnabled(ptr.To(true))
+				u.SetBusinessPhones([]string{"+1-555-0100"})
+				return []models.Userable{u}
+			}(),
+			requireActiveAccount: false,
+			additionalFields:     []string{"businessPhones"},
+			want: []interface{}{
+				map[string]interface{}{
+					"id":                   testUserID1,
+					fieldDisplayName:       testUserDisplay,
+					fieldUserPrincipalName: testUser1Email,
+					fieldMail:              testUser1Email,
+					fieldAccountEnabled:    true,
+					"businessPhones":       []interface{}{"+1-555-0100"},
+				},
+			},
+		},
+		"AdditionalFieldsNonScalarTime": {
+			reason: "A *time.Time field (createdDateTime) is normalised to RFC3339 string so it can be serialised",
+			graphUsers: func() []models.Userable {
+				u := models.NewUser()
+				u.SetId(ptr.To(testUserID1))
+				u.SetUserPrincipalName(ptr.To(testUser1Email))
+				u.SetMail(ptr.To(testUser1Email))
+				u.SetDisplayName(ptr.To(testUserDisplay))
+				u.SetAccountEnabled(ptr.To(true))
+				u.SetCreatedDateTime(ptr.To(time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)))
+				return []models.Userable{u}
+			}(),
+			requireActiveAccount: false,
+			additionalFields:     []string{"createdDateTime"},
+			want: []interface{}{
+				map[string]interface{}{
+					"id":                   testUserID1,
+					fieldDisplayName:       testUserDisplay,
+					fieldUserPrincipalName: testUser1Email,
+					fieldMail:              testUser1Email,
+					fieldAccountEnabled:    true,
+					"createdDateTime":      "2024-01-02T03:04:05Z",
+				},
+			},
+		},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			g := &GraphQuery{log: logging.NewNopLogger()}
-			got := g.buildUserResults(tc.graphUsers, tc.requireActiveAccount)
+			got := g.buildUserResults(tc.graphUsers, tc.requireActiveAccount, tc.additionalFields)
 			if diff := cmp.Diff(tc.want, got); diff != "" {
 				t.Errorf("%s\nbuildUserResults(...): -want, +got:\n%s", tc.reason, diff)
 			}
 		})
 	}
+}
+
+// TestApplyAdditionalFieldsSerialisation verifies that non-scalar Graph values
+// ([]string, *time.Time) survive the full serialisation path through
+// putQueryResultToContext without error. This is the regression test for the
+// proto: invalid type bug.
+func TestApplyAdditionalFieldsSerialisation(t *testing.T) {
+	u := models.NewUser()
+	u.SetId(ptr.To("uid-1"))
+	u.SetDisplayName(ptr.To("Test User"))
+	u.SetUserPrincipalName(ptr.To("test@example.com"))
+	u.SetMail(ptr.To("test@example.com"))
+	u.SetAccountEnabled(ptr.To(true))
+	u.SetBusinessPhones([]string{"+1-555-0100"})
+	u.SetCreatedDateTime(ptr.To(time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)))
+
+	g := &GraphQuery{log: logging.NewNopLogger()}
+	results := g.buildUserResults([]models.Userable{u}, false, []string{"businessPhones", "createdDateTime"})
+
+	req := &fnv1.RunFunctionRequest{}
+	rsp := &fnv1.RunFunctionResponse{}
+	f := &Function{log: logging.NewNopLogger()}
+	in := &v1beta1.Input{Target: "context.validatedUsers"}
+
+	if err := putQueryResultToContext(req, rsp, in, results, f); err != nil {
+		t.Fatalf("putQueryResultToContext returned unexpected error: %v", err)
+	}
+
+	got := rsp.GetContext().GetFields()["validatedUsers"].AsInterface()
+	entries, ok := got.([]interface{})
+	if !ok || len(entries) != 1 {
+		t.Fatalf("expected 1 entry in context, got %v", got)
+	}
+	entry, ok := entries[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map entry, got %T", entries[0])
+	}
+	if diff := cmp.Diff([]interface{}{"+1-555-0100"}, entry["businessPhones"]); diff != "" {
+		t.Errorf("businessPhones: -want, +got:\n%s", diff)
+	}
+	if diff := cmp.Diff("2024-01-02T03:04:05Z", entry["createdDateTime"]); diff != "" {
+		t.Errorf("createdDateTime: -want, +got:\n%s", diff)
+	}
+}
+
+// TestSanitizeAdditionalFields verifies that sanitizeAdditionalFields drops
+// entries that are not valid Graph property names and passes through valid ones.
+func TestSanitizeAdditionalFields(t *testing.T) {
+	g := &GraphQuery{log: logging.NewNopLogger()}
+
+	cases := map[string]struct {
+		input []string
+		want  []string
+	}{
+		"ValidFieldsPassThrough": {
+			input: []string{testFieldCity, testFieldDepartment, "extension_abc_costCenter"},
+			want:  []string{testFieldCity, testFieldDepartment, "extension_abc_costCenter"},
+		},
+		"EmptyStringDropped": {
+			input: []string{testFieldCity, "", testFieldDepartment},
+			want:  []string{testFieldCity, testFieldDepartment},
+		},
+		"ODataInjectionDropped": {
+			input: []string{"id),manager($select=id,displayName"},
+			want:  []string{},
+		},
+		"SpaceInNameDropped": {
+			input: []string{"display Name"},
+			want:  []string{},
+		},
+		"NilInputReturnsEmpty": {
+			input: nil,
+			want:  []string{},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := g.sanitizeAdditionalFields(tc.input)
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("sanitizeAdditionalFields: -want, +got:\n%s", diff)
+			}
+		})
+	}
+}
+
+// TestApplyAdditionalFieldsByModel verifies that applyAdditionalFields correctly
+// extracts typed getter values from each Graph model type used across the four
+// query types. This ensures reflection-based extraction works for Group and
+// ServicePrincipal in addition to User (covered by TestBuildUserResults).
+func TestApplyAdditionalFieldsByModel(t *testing.T) {
+	g := &GraphQuery{log: logging.NewNopLogger()}
+
+	t.Run("GroupMailNickname", func(t *testing.T) {
+		grp := models.NewGroup()
+		grp.SetId(ptr.To("group-id-1"))
+		grp.SetMailNickname(ptr.To("eng-team"))
+
+		m := map[string]interface{}{}
+		g.applyAdditionalFields(m, grp, "group-id-1", []string{"mailNickname"})
+
+		if diff := cmp.Diff(map[string]interface{}{"mailNickname": "eng-team"}, m); diff != "" {
+			t.Errorf("Group mailNickname: -want, +got:\n%s", diff)
+		}
+	})
+
+	t.Run("GroupSecurityEnabled", func(t *testing.T) {
+		grp := models.NewGroup()
+		grp.SetId(ptr.To("group-id-2"))
+		grp.SetSecurityEnabled(ptr.To(true))
+
+		m := map[string]interface{}{}
+		g.applyAdditionalFields(m, grp, "group-id-2", []string{"securityEnabled"})
+
+		if diff := cmp.Diff(map[string]interface{}{"securityEnabled": true}, m); diff != "" {
+			t.Errorf("Group securityEnabled: -want, +got:\n%s", diff)
+		}
+	})
+
+	t.Run("ServicePrincipalType", func(t *testing.T) {
+		sp := models.NewServicePrincipal()
+		sp.SetId(ptr.To("sp-id-1"))
+		sp.SetServicePrincipalType(ptr.To("Application"))
+
+		m := map[string]interface{}{}
+		g.applyAdditionalFields(m, sp, "sp-id-1", []string{"servicePrincipalType"})
+
+		if diff := cmp.Diff(map[string]interface{}{"servicePrincipalType": "Application"}, m); diff != "" {
+			t.Errorf("ServicePrincipal servicePrincipalType: -want, +got:\n%s", diff)
+		}
+	})
+
+	t.Run("ServicePrincipalHomepage", func(t *testing.T) {
+		sp := models.NewServicePrincipal()
+		sp.SetId(ptr.To("sp-id-2"))
+		sp.SetHomepage(ptr.To("https://example.com"))
+
+		m := map[string]interface{}{}
+		g.applyAdditionalFields(m, sp, "sp-id-2", []string{"homepage"})
+
+		if diff := cmp.Diff(map[string]interface{}{"homepage": "https://example.com"}, m); diff != "" {
+			t.Errorf("ServicePrincipal homepage: -want, +got:\n%s", diff)
+		}
+	})
+
+	t.Run("GroupMemberUserDepartment", func(t *testing.T) {
+		u := models.NewUser()
+		u.SetId(ptr.To(testUserID1))
+		u.SetDepartment(ptr.To("Engineering"))
+
+		m := map[string]interface{}{}
+		g.applyAdditionalFields(m, u, testUserID1, []string{testFieldDepartment})
+
+		if diff := cmp.Diff(map[string]interface{}{testFieldDepartment: "Engineering"}, m); diff != "" {
+			t.Errorf("GroupMembership user department: -want, +got:\n%s", diff)
+		}
+	})
+
+	t.Run("UnknownFieldSkipped", func(t *testing.T) {
+		grp := models.NewGroup()
+		grp.SetId(ptr.To("group-id-3"))
+
+		m := map[string]interface{}{}
+		g.applyAdditionalFields(m, grp, "group-id-3", []string{"nonExistentField"})
+
+		if len(m) != 0 {
+			t.Errorf("expected empty map for unknown field, got %v", m)
+		}
+	})
 }
 
 // TestProcessMember exercises the real member-extraction path (bypassed by the
@@ -4551,6 +5048,71 @@ func TestProcessMember(t *testing.T) {
 			got := g.processMember(tc.member)
 			if diff := cmp.Diff(tc.want, got); diff != "" {
 				t.Errorf("%s\nprocessMember(...): -want, +got:\n%s", tc.reason, diff)
+			}
+		})
+	}
+}
+
+// TestNormalizeGraphValue verifies that normalizeGraphValue converts non-scalar
+// Graph SDK values to JSON-safe types accepted by both structpb and encoding/json.
+func TestNormalizeGraphValue(t *testing.T) {
+	ts := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
+	strVal := "CC-42"
+	f64Val := float64(7)
+
+	cases := map[string]struct {
+		input  interface{}
+		want   interface{}
+		wantOK bool
+	}{
+		"NilReturnsFalse": {
+			input: nil, want: nil, wantOK: false,
+		},
+		"StringPassthrough": {
+			input: "hello", want: "hello", wantOK: true,
+		},
+		"BoolPassthrough": {
+			input: true, want: true, wantOK: true,
+		},
+		"Float64Passthrough": {
+			input: float64(3.14), want: float64(3.14), wantOK: true,
+		},
+		"TimeFormattedAsRFC3339": {
+			input: ts, want: "2024-01-02T03:04:05Z", wantOK: true,
+		},
+		"PtrTimeDeref": {
+			input: &ts, want: "2024-01-02T03:04:05Z", wantOK: true,
+		},
+		"PtrStringDeref": {
+			input: &strVal, want: "CC-42", wantOK: true,
+		},
+		"PtrFloat64Deref": {
+			input: &f64Val, want: float64(7), wantOK: true,
+		},
+		"NilPtrReturnsFalse": {
+			input: (*string)(nil), want: nil, wantOK: false,
+		},
+		"ByteSliceBase64Encoded": {
+			input: []byte("hello"), want: "aGVsbG8=", wantOK: true,
+		},
+		"StringSliceToInterfaceSlice": {
+			input: []string{"a", "b"}, want: []interface{}{"a", "b"}, wantOK: true,
+		},
+		"MapStringInterface": {
+			input:  map[string]interface{}{"k": "v"},
+			want:   map[string]interface{}{"k": "v"},
+			wantOK: true,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got, ok := normalizeGraphValue(tc.input)
+			if ok != tc.wantOK {
+				t.Errorf("normalizeGraphValue(%T): wantOK=%v got=%v", tc.input, tc.wantOK, ok)
+			}
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("normalizeGraphValue(%T): -want, +got:\n%s", tc.input, diff)
 			}
 		})
 	}
