@@ -26,6 +26,8 @@ const (
 	testCredentialsKey = "credentials"
 	testAzureCredsName = "azure-creds"
 	testSPID1          = "sp-id-1"
+	testUserID1        = "user-id-1"
+	testUserDisplay    = "Test User"
 	testUser1Email     = "user1@example.com"
 	testUser2Email     = "user2@example.com"
 	watchedResourceKey = "ops.crossplane.io/watched-resource"
@@ -987,7 +989,7 @@ func TestResolveGroupRef(t *testing.T) {
 						}
 						return []interface{}{
 							map[string]interface{}{
-								"id":                   "user-id-1",
+								"id":                   testUserID1,
 								fieldDisplayName:       "Test User 1",
 								fieldMail:              testUser1Email,
 								fieldUserPrincipalName: testUser1Email,
@@ -1586,7 +1588,7 @@ func TestResolveUsersRef(t *testing.T) {
 							// Generate different test data based on user principal name
 							switch *user {
 							case testUser1Email:
-								userID = "user-id-1"
+								userID = testUserID1
 								displayName = "User 1"
 							case testUser2Email:
 								userID = "user-id-2"
@@ -1596,7 +1598,7 @@ func TestResolveUsersRef(t *testing.T) {
 								displayName = "Admin User"
 							default:
 								userID = "test-user-id"
-								displayName = "Test User"
+								displayName = testUserDisplay
 							}
 
 							userMap := map[string]interface{}{
@@ -3989,7 +3991,7 @@ func TestRunFunction(t *testing.T) {
 							return []interface{}{
 								map[string]interface{}{
 									"id":                   "test-user-id",
-									fieldDisplayName:       "Test User",
+									fieldDisplayName:       testUserDisplay,
 									fieldUserPrincipalName: "user@example.com",
 									fieldMail:              "user@example.com",
 									fieldAccountEnabled:    true,
@@ -3999,7 +4001,7 @@ func TestRunFunction(t *testing.T) {
 						return []interface{}{
 							map[string]interface{}{
 								"id":                   "test-user-id",
-								fieldDisplayName:       "Test User",
+								fieldDisplayName:       testUserDisplay,
 								fieldUserPrincipalName: "user@example.com",
 								fieldMail:              "user@example.com",
 							},
@@ -4010,7 +4012,7 @@ func TestRunFunction(t *testing.T) {
 						}
 						return []interface{}{
 							map[string]interface{}{
-								"id":                   "user-id-1",
+								"id":                   testUserID1,
 								fieldDisplayName:       "Test User 1",
 								fieldMail:              testUser1Email,
 								fieldUserPrincipalName: testUser1Email,
@@ -4297,7 +4299,7 @@ func TestIdentityType(t *testing.T) {
 // in additionalData).
 func newTestUser() models.DirectoryObjectable {
 	user := models.NewUser()
-	user.SetId(ptr.To("user-id-1"))
+	user.SetId(ptr.To(testUserID1))
 	user.SetDisplayName(ptr.To("Test User 1"))
 	user.SetMail(ptr.To(testUser1Email))
 	user.SetUserPrincipalName(ptr.To(testUser1Email))
@@ -4343,7 +4345,7 @@ func newTestDirectoryObject() models.DirectoryObjectable {
 func newTestGraphUser(id, upn string, accountEnabled bool) models.Userable {
 	user := models.NewUser()
 	user.SetId(ptr.To(id))
-	user.SetDisplayName(ptr.To("Test User"))
+	user.SetDisplayName(ptr.To(testUserDisplay))
 	user.SetMail(ptr.To(upn))
 	user.SetUserPrincipalName(ptr.To(upn))
 	user.SetAccountEnabled(ptr.To(accountEnabled))
@@ -4356,7 +4358,7 @@ func newTestGraphUser(id, upn string, accountEnabled bool) models.Userable {
 func newTestGraphUserWithoutAccountEnabled() models.Userable {
 	user := models.NewUser()
 	user.SetId(ptr.To("user-id-unknown"))
-	user.SetDisplayName(ptr.To("Test User"))
+	user.SetDisplayName(ptr.To(testUserDisplay))
 	user.SetMail(ptr.To("unknown@example.com"))
 	user.SetUserPrincipalName(ptr.To("unknown@example.com"))
 	// accountEnabled intentionally left unset.
@@ -4385,21 +4387,21 @@ func TestBuildUserResults(t *testing.T) {
 		"FlagOffKeepsDisabledUsers": {
 			reason: "Without activeAccount a disabled user is kept and reported as accountEnabled false",
 			graphUsers: []models.Userable{
-				newTestGraphUser("user-id-1", testUser1Email, true),
+				newTestGraphUser(testUserID1, testUser1Email, true),
 				newTestGraphUser("user-id-2", testUser2Email, false),
 			},
 			requireActiveAccount: false,
 			want: []interface{}{
 				map[string]interface{}{
-					"id":                   "user-id-1",
-					fieldDisplayName:       "Test User",
+					"id":                   testUserID1,
+					fieldDisplayName:       testUserDisplay,
 					fieldUserPrincipalName: testUser1Email,
 					fieldMail:              testUser1Email,
 					fieldAccountEnabled:    true,
 				},
 				map[string]interface{}{
 					"id":                   "user-id-2",
-					fieldDisplayName:       "Test User",
+					fieldDisplayName:       testUserDisplay,
 					fieldUserPrincipalName: testUser2Email,
 					fieldMail:              testUser2Email,
 					fieldAccountEnabled:    false,
@@ -4409,14 +4411,14 @@ func TestBuildUserResults(t *testing.T) {
 		"FlagOnDropsDisabledUsers": {
 			reason: "With activeAccount only the enabled user is returned",
 			graphUsers: []models.Userable{
-				newTestGraphUser("user-id-1", testUser1Email, true),
+				newTestGraphUser(testUserID1, testUser1Email, true),
 				newTestGraphUser("user-id-2", testUser2Email, false),
 			},
 			requireActiveAccount: true,
 			want: []interface{}{
 				map[string]interface{}{
-					"id":                   "user-id-1",
-					fieldDisplayName:       "Test User",
+					"id":                   testUserID1,
+					fieldDisplayName:       testUserDisplay,
 					fieldUserPrincipalName: testUser1Email,
 					fieldMail:              testUser1Email,
 					fieldAccountEnabled:    true,
@@ -4436,7 +4438,7 @@ func TestBuildUserResults(t *testing.T) {
 			want: []interface{}{
 				map[string]interface{}{
 					"id":                   "user-id-unknown",
-					fieldDisplayName:       "Test User",
+					fieldDisplayName:       testUserDisplay,
 					fieldUserPrincipalName: "unknown@example.com",
 					fieldMail:              "unknown@example.com",
 					fieldAccountEnabled:    false,
@@ -4451,12 +4453,12 @@ func TestBuildUserResults(t *testing.T) {
 		},
 		"NilUserSkipped": {
 			reason:               "A nil entry in the returned collection is skipped",
-			graphUsers:           []models.Userable{nil, newTestGraphUser("user-id-1", testUser1Email, true)},
+			graphUsers:           []models.Userable{nil, newTestGraphUser(testUserID1, testUser1Email, true)},
 			requireActiveAccount: true,
 			want: []interface{}{
 				map[string]interface{}{
-					"id":                   "user-id-1",
-					fieldDisplayName:       "Test User",
+					"id":                   testUserID1,
+					fieldDisplayName:       testUserDisplay,
 					fieldUserPrincipalName: testUser1Email,
 					fieldMail:              testUser1Email,
 					fieldAccountEnabled:    true,
@@ -4503,7 +4505,7 @@ func TestProcessMember(t *testing.T) {
 			reason: "A typed user member should expose mail and userPrincipalName from the typed getters",
 			member: newTestUser(),
 			want: map[string]interface{}{
-				"id":                   "user-id-1",
+				"id":                   testUserID1,
 				fieldDisplayName:       "Test User 1",
 				fieldType:              userType,
 				fieldMail:              testUser1Email,
