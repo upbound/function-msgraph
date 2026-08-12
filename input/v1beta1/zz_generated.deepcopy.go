@@ -101,6 +101,11 @@ func (in *Input) DeepCopyInto(out *Input) {
 		*out = new(bool)
 		**out = **in
 	}
+	if in.ActiveAccount != nil {
+		in, out := &in.ActiveAccount, &out.ActiveAccount
+		*out = new(bool)
+		**out = **in
+	}
 	if in.Identity != nil {
 		in, out := &in.Identity, &out.Identity
 		*out = new(Identity)

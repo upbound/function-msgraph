@@ -21,6 +21,15 @@ spec:
       openAPIV3Schema:
         description: Input can be used to provide input to this Function.
         properties:
+          activeAccount:
+            description: |-
+              ActiveAccount restricts UserValidation results to users whose Entra ID
+              accountEnabled attribute is true. Disabled users, and users for which
+              Microsoft Graph returns no accountEnabled value, are omitted from the
+              result written to the target.
+              If false or unset, users are validated on existence alone.
+              Only applies to the UserValidation query type.
+            type: boolean
           apiVersion:
             description: |-
               APIVersion defines the versioned schema of this representation of an object.

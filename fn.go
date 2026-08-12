@@ -72,6 +72,7 @@ const (
 	fieldMail              = "mail"
 	fieldUserPrincipalName = "userPrincipalName"
 	fieldType              = "type"
+	fieldAccountEnabled    = "accountEnabled"
 )
 
 const (
@@ -528,6 +529,7 @@ func (g *GraphQuery) validateUsers(ctx context.Context, client *msgraphsdk.Graph
 	}
 
 	results := make([]interface{}, 0)
+	requireActiveAccount := ptr.Deref(in.ActiveAccount, false)
 
 	for _, userPrincipalName := range in.Users {
 		if userPrincipalName == nil {
@@ -543,8 +545,9 @@ func (g *GraphQuery) validateUsers(ctx context.Context, client *msgraphsdk.Graph
 		filterValue := fmt.Sprintf("userPrincipalName eq '%s'", *userPrincipalName)
 		requestConfig.QueryParameters.Filter = &filterValue
 
-		// Use standard fields for user validation
-		requestConfig.QueryParameters.Select = []string{"id", fieldDisplayName, fieldUserPrincipalName, fieldMail}
+		// Use standard fields for user validation. accountEnabled is returned by
+		// Microsoft Graph only when it is explicitly selected.
+		requestConfig.QueryParameters.Select = []string{"id", fieldDisplayName, fieldUserPrincipalName, fieldMail, fieldAccountEnabled}
 
 		// Execute the query
 		result, err := client.Users().Get(ctx, requestConfig)
@@ -553,20 +556,42 @@ func (g *GraphQuery) validateUsers(ctx context.Context, client *msgraphsdk.Graph
 		}
 
 		// Process results
-		if result.GetValue() != nil {
-			for _, user := range result.GetValue() {
-				userMap := map[string]interface{}{
-					"id":                   ptr.Deref(user.GetId(), ""),
-					fieldDisplayName:       ptr.Deref(user.GetDisplayName(), ""),
-					fieldUserPrincipalName: ptr.Deref(user.GetUserPrincipalName(), ""),
-					fieldMail:              ptr.Deref(user.GetMail(), ""),
-				}
-				results = append(results, userMap)
-			}
-		}
+		results = append(results, g.buildUserResults(result.GetValue(), requireActiveAccount)...)
 	}
 
 	return results, nil
+}
+
+// buildUserResults converts the users returned by a single UserValidation lookup
+// into result maps. When requireActiveAccount is set, users whose accountEnabled
+// attribute is not true are omitted. A nil attribute is treated as disabled,
+// because Microsoft Graph returns accountEnabled only when it is explicitly
+// selected, so an absent value means the account state is unconfirmed.
+func (g *GraphQuery) buildUserResults(graphUsers []models.Userable, requireActiveAccount bool) []interface{} {
+	results := make([]interface{}, 0, len(graphUsers))
+
+	for _, user := range graphUsers {
+		if user == nil {
+			continue
+		}
+
+		accountEnabled := ptr.Deref(user.GetAccountEnabled(), false)
+		if requireActiveAccount && !accountEnabled {
+			g.log.Debug("Skipping user with disabled account",
+				fieldUserPrincipalName, ptr.Deref(user.GetUserPrincipalName(), ""))
+			continue
+		}
+
+		results = append(results, map[string]interface{}{
+			"id":                   ptr.Deref(user.GetId(), ""),
+			fieldDisplayName:       ptr.Deref(user.GetDisplayName(), ""),
+			fieldUserPrincipalName: ptr.Deref(user.GetUserPrincipalName(), ""),
+			fieldMail:              ptr.Deref(user.GetMail(), ""),
+			fieldAccountEnabled:    accountEnabled,
+		})
+	}
+
+	return results
 }
 
 // findGroupByName finds a group by its display name and returns its ID

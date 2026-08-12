@@ -86,6 +86,15 @@ type Input struct {
 	// +optional
 	FailOnEmpty *bool `json:"failOnEmpty,omitempty"`
 
+	// ActiveAccount restricts UserValidation results to users whose Entra ID
+	// accountEnabled attribute is true. Disabled users, and users for which
+	// Microsoft Graph returns no accountEnabled value, are omitted from the
+	// result written to the target.
+	// If false or unset, users are validated on existence alone.
+	// Only applies to the UserValidation query type.
+	// +optional
+	ActiveAccount *bool `json:"activeAccount,omitempty"`
+
 	// Identity defines the type of identity used for authentication to the Microsoft Graph API.
 	Identity *Identity `json:"identity,omitempty"`
 }
