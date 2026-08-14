@@ -1,0 +1,65 @@
+---
+# Baseline: existence check only. A disabled account still passes validation,
+# which is the behaviour activeAccount exists to change. Kept alongside the
+# filtered Composition so the two can be compared in the same cluster.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: user-validation-baseline-e2e
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1
+    kind: XR
+  mode: Pipeline
+  pipeline:
+    - step: validate-user
+      functionRef:
+        name: function-msgraph
+      input:
+        apiVersion: msgraph.fn.crossplane.io/v1alpha1
+        kind: Input
+        queryType: UserValidation
+        # Replace with real accounts from your directory: one enabled, one
+        # deliberately disabled, otherwise there is nothing for the filter to do.
+        users:
+          - "user@example.onmicrosoft.com"
+          - "disabled-user@example.onmicrosoft.com"
+        target: "status.validatedUsers"
+      credentials:
+        - name: azure-creds
+          source: Secret
+          secretRef:
+            namespace: crossplane-system
+            name: azure-account-creds
+---
+# Same query, restricted to enabled accounts. Note that neither
+# skipQueryWhenTargetHasData nor queryInterval is set: both suppress the query,
+# so an already-populated target would keep its disabled entries.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: user-validation-active-account-e2e
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1
+    kind: XR
+  mode: Pipeline
+  pipeline:
+    - step: validate-user
+      functionRef:
+        name: function-msgraph
+      input:
+        apiVersion: msgraph.fn.crossplane.io/v1alpha1
+        kind: Input
+        queryType: UserValidation
+        users:
+          - "user@example.onmicrosoft.com"
+          - "disabled-user@example.onmicrosoft.com"
+        target: "status.validatedUsers"
+        activeAccount: true
+      credentials:
+        - name: azure-creds
+          source: Secret
+          secretRef:
+            namespace: crossplane-system
+            name: azure-account-creds

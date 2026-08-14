@@ -141,3 +141,19 @@ crossplane render xr-with-last-query-time.yaml user-validation-example-query-int
 > `xr-with-last-query-time.yaml` uses a far-future timestamp in `status.lastQueryTimestamps` so the skip is deterministic; set it to a real recent time to test the natural elapsed boundary. The credentials are not used on the skip path (no Graph call is made), so they need not be valid for this command.
 
 > **macOS note:** these commands use `-r` (function results) rather than `-rc`. The `-c`/`--include-context` flag makes `crossplane render` v2.x run an internal context-extraction step over a unix socket bind-mounted into its Docker helper container, which Docker Desktop for macOS does not support (`connect: operation not supported`) — the render then hangs with no output. Since the query-interval results are written to a `status.` target, `-c` is unnecessary here. This is a known CLI bug ([crossplane/cli#161](https://github.com/crossplane/cli/issues/161)), fixed by [#163](https://github.com/crossplane/cli/pull/163) (context function now listens on TCP) but not yet in a tagged release as of CLI v2.4.0. Until then, drop `-c` on macOS, or run `crossplane render` on Linux / a CLI built from `main` if you need context output.
+
+### 6. Active Account Filtering
+
+Restrict `UserValidation` results to enabled accounts with `activeAccount: true`. Users whose Entra ID `accountEnabled` attribute is not true are omitted from the target. Every result carries its `accountEnabled` value regardless of the flag, so the two renders below can be compared directly (both write to a `status.` target, so `-r` is sufficient, see the macOS note above):
+
+```shell
+crossplane render xr.yaml user-validation-example-active-account.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -r
+```
+
+Disabled users are absent from `status.validatedUsers`, and every remaining entry has `accountEnabled: true`. Render the plain example for the unfiltered baseline, where a disabled user is still listed, with `accountEnabled: false`:
+
+```shell
+crossplane render xr.yaml user-validation-example.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -r
+```
+
+> The example intentionally omits `skipQueryWhenTargetHasData`. Enabling `activeAccount` on an XR whose target already holds disabled users does not purge them while the query is being skipped, so clear the target once (or drop the skip for one reconcile) when adopting the flag on an existing deployment.

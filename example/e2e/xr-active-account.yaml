@@ -1,0 +1,24 @@
+---
+apiVersion: example.crossplane.io/v1
+kind: XR
+metadata:
+  name: msgraph-baseline-e2e
+spec:
+  compositionRef:
+    name: user-validation-baseline-e2e
+  userAccess:
+    emails:
+      - "user@example.onmicrosoft.com"
+      - "disabled-user@example.onmicrosoft.com"
+---
+apiVersion: example.crossplane.io/v1
+kind: XR
+metadata:
+  name: msgraph-active-account-e2e
+spec:
+  compositionRef:
+    name: user-validation-active-account-e2e
+  userAccess:
+    emails:
+      - "user@example.onmicrosoft.com"
+      - "disabled-user@example.onmicrosoft.com"

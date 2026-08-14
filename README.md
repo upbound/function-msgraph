@@ -163,6 +163,40 @@ spec:
           name: azure-account-creds
 ```
 
+#### Only Active (Enabled) Accounts
+
+By default a user is validated on existence alone, so a disabled (for example
+offboarded) account still passes. Set `activeAccount: true` to additionally
+require the Entra ID `accountEnabled` attribute to be true, omitting disabled
+users from the result:
+
+```yaml
+      queryType: UserValidation
+      users:
+        - "user1@yourdomain.com"
+        - "user2@yourdomain.com"
+      target: "status.validatedUsers"
+      activeAccount: true
+```
+
+Every validated user carries its `accountEnabled` value in the result,
+regardless of whether `activeAccount` is set, so the account state is visible to
+downstream consumers either way. A user for which Microsoft Graph returns no
+`accountEnabled` value is treated as disabled: when the account state cannot be
+confirmed, `activeAccount: true` excludes the user.
+
+> Note: `activeAccount` only applies to the `UserValidation` query type, and it
+> filters the result of a query. It does not retroactively purge users from a
+> target that is no longer being refreshed, so combining it with
+> `skipQueryWhenTargetHasData: true` on an existing XR leaves any already-stored
+> disabled users in place. Clear the target once (or drop the skip for one
+> reconcile) when enabling the flag on an existing deployment. `queryInterval`
+> has the same effect, bounded by the interval.
+
+> Note: consumers whose XRD constrains the target with a structural item schema
+> (rather than `x-kubernetes-preserve-unknown-fields`) need to add
+> `accountEnabled` to that schema, otherwise the API server silently prunes it.
+
 ### Get Group Membership
 
 ```yaml
@@ -276,7 +310,8 @@ spec:
 | `target` | string | Required. Where to store the query results. Can be `status.<field>` or `context.<field>` |
 | `skipQueryWhenTargetHasData` | bool | Optional. When true, will skip the query if the target already has data |
 | `queryInterval` | string | Optional. Minimum interval between queries as a Go duration string (e.g. `10m`, `1h`, `90s`). Skips querying Microsoft Graph until the interval has elapsed since the last successful query, independent of reconcile frequency. Only effective in Composition mode with a `status.` target. |
-| `FailOnEmpty` | bool | Optional. When true, the function will fail if the `users`, `groups`, or `servicePrincipals` lists are empty, or if their respective reference fields are empty lists. |
+| `failOnEmpty` | bool | Optional. When true, the function will fail if the `users`, `groups`, or `servicePrincipals` lists are empty, or if their respective reference fields are empty lists. |
+| `activeAccount` | bool | Optional. `UserValidation` only. When true, only users whose Entra ID `accountEnabled` attribute is true are stored at the target; disabled users, and users whose account state Graph does not report, are omitted. |
 | `identity.type` | string | Optional. Type of identity credentials to use. Valid values: `AzureServicePrincipalCredentials`, `AzureWorkloadIdentityCredentials`. Default is `AzureServicePrincipalCredentials` |
 
 ## Result Targets
@@ -336,6 +371,7 @@ status:
       displayName: "Jane Doe"
       userPrincipalName: "jane@example.com"
       mail: "jane@example.com"
+      accountEnabled: true
   lastQueryTimestamps:         # separate metadata, keyed by target
     validatedUsers: "2026-07-16T10:00:00Z"
 ```

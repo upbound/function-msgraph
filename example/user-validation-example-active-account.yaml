@@ -1,0 +1,40 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: user-validation-example-active-account
+# Important: This function example requires an Azure AD app registration with Microsoft Graph API permissions:
+# - User.Read.All
+# - Directory.Read.All
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1
+    kind: XR
+  mode: Pipeline
+  pipeline:
+    - step: validate-user
+      functionRef:
+        name: function-msgraph
+      input:
+        apiVersion: msgraph.fn.crossplane.io/v1alpha1
+        kind: Input
+        queryType: UserValidation
+        # Replace these with actual users in your directory. To see the filter
+        # take effect, include at least one account that is disabled in Entra ID.
+        users:
+          - "admin@example.onmicrosoft.com"
+          - "user@example.onmicrosoft.com"
+          - "yury@upbound.io"
+        target: "status.validatedUsers"
+        # Only users whose accountEnabled attribute is true are stored at the
+        # target. Disabled users, and users whose account state Microsoft Graph
+        # does not report, are omitted.
+        activeAccount: true
+        # Note: skipQueryWhenTargetHasData is deliberately not set here, so every
+        # render re-queries Graph. With the skip enabled, a target that already
+        # holds disabled users is never refreshed and they would persist.
+      credentials:
+        - name: azure-creds
+          source: Secret
+          secretRef:
+            namespace: crossplane-system
+            name: azure-account-creds

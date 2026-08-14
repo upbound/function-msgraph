@@ -26,6 +26,8 @@ const (
 	testCredentialsKey = "credentials"
 	testAzureCredsName = "azure-creds"
 	testSPID1          = "sp-id-1"
+	testUserID1        = "user-id-1"
+	testUserDisplay    = "Test User"
 	testUser1Email     = "user1@example.com"
 	testUser2Email     = "user2@example.com"
 	watchedResourceKey = "ops.crossplane.io/watched-resource"
@@ -987,7 +989,7 @@ func TestResolveGroupRef(t *testing.T) {
 						}
 						return []interface{}{
 							map[string]interface{}{
-								"id":                   "user-id-1",
+								"id":                   testUserID1,
 								fieldDisplayName:       "Test User 1",
 								fieldMail:              testUser1Email,
 								fieldUserPrincipalName: testUser1Email,
@@ -1586,7 +1588,7 @@ func TestResolveUsersRef(t *testing.T) {
 							// Generate different test data based on user principal name
 							switch *user {
 							case testUser1Email:
-								userID = "user-id-1"
+								userID = testUserID1
 								displayName = "User 1"
 							case testUser2Email:
 								userID = "user-id-2"
@@ -1596,7 +1598,7 @@ func TestResolveUsersRef(t *testing.T) {
 								displayName = "Admin User"
 							default:
 								userID = "test-user-id"
-								displayName = "Test User"
+								displayName = testUserDisplay
 							}
 
 							userMap := map[string]interface{}{
@@ -2480,6 +2482,77 @@ func TestRunFunction(t *testing.T) {
 											"displayName": "Test User",
 											"userPrincipalName": "user@example.com",
 											"mail": "user@example.com"
+										}
+									]
+								}}`),
+						},
+					},
+				},
+			},
+		},
+		"UserValidationActiveAccount": {
+			reason: "The Function should pass activeAccount through to the query and store only the enabled users",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "UserValidation",
+						"users": ["user@example.com", "disabled@example.com"],
+						"activeAccount": true,
+						"target": "status.validatedUsers"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+					Credentials: map[string]*fnv1.Credentials{
+						testAzureCredsName: {
+							Source: &fnv1.Credentials_CredentialData{CredentialData: creds},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
+					Conditions: []*fnv1.Condition{
+						{
+							Type:   condTypeFunctionSuccess,
+							Status: fnv1.Status_STATUS_CONDITION_TRUE,
+							Reason: condReasonSuccess,
+							Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+						},
+					},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_NORMAL,
+							Message:  msgUserValidationQueryType,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.org/v1",
+								"kind": "XR",
+								"metadata": {
+									"name": "cool-xr"
+								},
+								"spec": {
+									"count": 2
+								},
+								"status": {
+									"validatedUsers": [
+										{
+											"id": "test-user-id",
+											"displayName": "Test User",
+											"userPrincipalName": "user@example.com",
+											"mail": "user@example.com",
+											"accountEnabled": true
 										}
 									]
 								}}`),
@@ -3912,10 +3985,23 @@ func TestRunFunction(t *testing.T) {
 						if len(in.Users) == 0 {
 							return nil, errors.New("no users provided for validation")
 						}
+						if ptr.Deref(in.ActiveAccount, false) {
+							// Mirrors buildUserResults: the disabled user is dropped
+							// and the remaining one carries accountEnabled.
+							return []interface{}{
+								map[string]interface{}{
+									"id":                   "test-user-id",
+									fieldDisplayName:       testUserDisplay,
+									fieldUserPrincipalName: "user@example.com",
+									fieldMail:              "user@example.com",
+									fieldAccountEnabled:    true,
+								},
+							}, nil
+						}
 						return []interface{}{
 							map[string]interface{}{
 								"id":                   "test-user-id",
-								fieldDisplayName:       "Test User",
+								fieldDisplayName:       testUserDisplay,
 								fieldUserPrincipalName: "user@example.com",
 								fieldMail:              "user@example.com",
 							},
@@ -3926,7 +4012,7 @@ func TestRunFunction(t *testing.T) {
 						}
 						return []interface{}{
 							map[string]interface{}{
-								"id":                   "user-id-1",
+								"id":                   testUserID1,
 								fieldDisplayName:       "Test User 1",
 								fieldMail:              testUser1Email,
 								fieldUserPrincipalName: testUser1Email,
@@ -4213,7 +4299,7 @@ func TestIdentityType(t *testing.T) {
 // in additionalData).
 func newTestUser() models.DirectoryObjectable {
 	user := models.NewUser()
-	user.SetId(ptr.To("user-id-1"))
+	user.SetId(ptr.To(testUserID1))
 	user.SetDisplayName(ptr.To("Test User 1"))
 	user.SetMail(ptr.To(testUser1Email))
 	user.SetUserPrincipalName(ptr.To(testUser1Email))
@@ -4254,6 +4340,158 @@ func newTestDirectoryObject() models.DirectoryObjectable {
 	return do
 }
 
+// newTestGraphUser builds a typed Graph user as returned by a UserValidation
+// lookup, with the accountEnabled attribute set to the given value.
+func newTestGraphUser(id, upn string, accountEnabled bool) models.Userable {
+	user := models.NewUser()
+	user.SetId(ptr.To(id))
+	user.SetDisplayName(ptr.To(testUserDisplay))
+	user.SetMail(ptr.To(upn))
+	user.SetUserPrincipalName(ptr.To(upn))
+	user.SetAccountEnabled(ptr.To(accountEnabled))
+	return user
+}
+
+// newTestGraphUserWithoutAccountEnabled builds a typed Graph user whose
+// accountEnabled attribute is absent, as happens when the property is not
+// projected via $select or is withheld from the caller.
+func newTestGraphUserWithoutAccountEnabled() models.Userable {
+	user := models.NewUser()
+	user.SetId(ptr.To("user-id-unknown"))
+	user.SetDisplayName(ptr.To(testUserDisplay))
+	user.SetMail(ptr.To("unknown@example.com"))
+	user.SetUserPrincipalName(ptr.To("unknown@example.com"))
+	// accountEnabled intentionally left unset.
+	return user
+}
+
+// newTestGraphUserMinimal builds a typed Graph user carrying only an id and an
+// accountEnabled attribute, exercising the empty-string defaults.
+func newTestGraphUserMinimal() models.Userable {
+	user := models.NewUser()
+	user.SetId(ptr.To("user-id-minimal"))
+	user.SetAccountEnabled(ptr.To(true))
+	return user
+}
+
+// TestBuildUserResults exercises the real UserValidation result-building path
+// (bypassed by the mocked graphQuery in the RunFunction tests), including the
+// accountEnabled filtering enabled by the activeAccount input.
+func TestBuildUserResults(t *testing.T) {
+	cases := map[string]struct {
+		reason               string
+		graphUsers           []models.Userable
+		requireActiveAccount bool
+		want                 []interface{}
+	}{
+		"FlagOffKeepsDisabledUsers": {
+			reason: "Without activeAccount a disabled user is kept and reported as accountEnabled false",
+			graphUsers: []models.Userable{
+				newTestGraphUser(testUserID1, testUser1Email, true),
+				newTestGraphUser("user-id-2", testUser2Email, false),
+			},
+			requireActiveAccount: false,
+			want: []interface{}{
+				map[string]interface{}{
+					"id":                   testUserID1,
+					fieldDisplayName:       testUserDisplay,
+					fieldUserPrincipalName: testUser1Email,
+					fieldMail:              testUser1Email,
+					fieldAccountEnabled:    true,
+				},
+				map[string]interface{}{
+					"id":                   "user-id-2",
+					fieldDisplayName:       testUserDisplay,
+					fieldUserPrincipalName: testUser2Email,
+					fieldMail:              testUser2Email,
+					fieldAccountEnabled:    false,
+				},
+			},
+		},
+		"FlagOnDropsDisabledUsers": {
+			reason: "With activeAccount only the enabled user is returned",
+			graphUsers: []models.Userable{
+				newTestGraphUser(testUserID1, testUser1Email, true),
+				newTestGraphUser("user-id-2", testUser2Email, false),
+			},
+			requireActiveAccount: true,
+			want: []interface{}{
+				map[string]interface{}{
+					"id":                   testUserID1,
+					fieldDisplayName:       testUserDisplay,
+					fieldUserPrincipalName: testUser1Email,
+					fieldMail:              testUser1Email,
+					fieldAccountEnabled:    true,
+				},
+			},
+		},
+		"FlagOnNilAccountEnabledExcluded": {
+			reason:               "With activeAccount an unconfirmed account state must fail closed and be excluded",
+			graphUsers:           []models.Userable{newTestGraphUserWithoutAccountEnabled()},
+			requireActiveAccount: true,
+			want:                 []interface{}{},
+		},
+		"FlagOffNilAccountEnabledReportedFalse": {
+			reason:               "Without activeAccount an absent accountEnabled attribute is reported as false",
+			graphUsers:           []models.Userable{newTestGraphUserWithoutAccountEnabled()},
+			requireActiveAccount: false,
+			want: []interface{}{
+				map[string]interface{}{
+					"id":                   "user-id-unknown",
+					fieldDisplayName:       testUserDisplay,
+					fieldUserPrincipalName: "unknown@example.com",
+					fieldMail:              "unknown@example.com",
+					fieldAccountEnabled:    false,
+				},
+			},
+		},
+		"EmptyInputReturnsEmptySlice": {
+			reason:               "A lookup that matched no user returns an empty list rather than nil",
+			graphUsers:           nil,
+			requireActiveAccount: true,
+			want:                 []interface{}{},
+		},
+		"NilUserSkipped": {
+			reason:               "A nil entry in the returned collection is skipped",
+			graphUsers:           []models.Userable{nil, newTestGraphUser(testUserID1, testUser1Email, true)},
+			requireActiveAccount: true,
+			want: []interface{}{
+				map[string]interface{}{
+					"id":                   testUserID1,
+					fieldDisplayName:       testUserDisplay,
+					fieldUserPrincipalName: testUser1Email,
+					fieldMail:              testUser1Email,
+					fieldAccountEnabled:    true,
+				},
+			},
+		},
+		"MissingOptionalFieldsDefaultToEmptyString": {
+			reason:               "Absent displayName and mail attributes are reported as empty strings",
+			graphUsers:           []models.Userable{newTestGraphUserMinimal()},
+			requireActiveAccount: true,
+			want: []interface{}{
+				map[string]interface{}{
+					"id":                   "user-id-minimal",
+					fieldDisplayName:       "",
+					fieldUserPrincipalName: "",
+					fieldMail:              "",
+					fieldAccountEnabled:    true,
+				},
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			g := &GraphQuery{log: logging.NewNopLogger()}
+			got := g.buildUserResults(tc.graphUsers, tc.requireActiveAccount)
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("%s\nbuildUserResults(...): -want, +got:\n%s", tc.reason, diff)
+			}
+		})
+	}
+}
+
 // TestProcessMember exercises the real member-extraction path (bypassed by the
 // mocked graphQuery in the RunFunction tests). It is the regression test for
 // issue #115: typed user members must expose mail and userPrincipalName.
@@ -4267,7 +4505,7 @@ func TestProcessMember(t *testing.T) {
 			reason: "A typed user member should expose mail and userPrincipalName from the typed getters",
 			member: newTestUser(),
 			want: map[string]interface{}{
-				"id":                   "user-id-1",
+				"id":                   testUserID1,
 				fieldDisplayName:       "Test User 1",
 				fieldType:              userType,
 				fieldMail:              testUser1Email,
