@@ -197,6 +197,45 @@ confirmed, `activeAccount: true` excludes the user.
 > (rather than `x-kubernetes-preserve-unknown-fields`) need to add
 > `accountEnabled` to that schema, otherwise the API server silently prunes it.
 
+### Additional Fields
+
+Use `additionalFields` to include extra Microsoft Graph attributes beyond the default set. Supported for all query types.
+
+| queryType | Default fields | Valid additional fields (examples) |
+|---|---|---|
+| `UserValidation` | `id`, `displayName`, `userPrincipalName`, `mail`, `accountEnabled` | `city`, `country`, `department`, `jobTitle`, `officeLocation`, `employeeType`, `usageLocation` |
+| `GroupObjectIDs` | `id`, `displayName`, `description` | `mailNickname`, `securityEnabled` |
+| `ServicePrincipalDetails` | `id`, `appId`, `displayName`, `description` | `servicePrincipalType`, `homepage` |
+| `GroupMembership` | `id`, `displayName`, `mail`, `userPrincipalName`, `appId` (plus `type`, derived by the function) | `department`, `jobTitle` (user members only) |
+
+> **Note:** Field names must match the Microsoft Graph API property name exactly (camelCase). Unknown field names are skipped with an `Info` log entry in the function pod. Fields that exist in Graph API but have no value for a given object are silently skipped (visible at `Debug` log level).
+
+```yaml
+apiVersion: msgraph.fn.crossplane.io/v1alpha1
+kind: Input
+queryType: UserValidation
+usersRef: "spec.owners"
+target: "status.validatedUsers"
+additionalFields:
+  - city
+  - department
+  - jobTitle
+```
+
+Result:
+
+```yaml
+status:
+  validatedUsers:
+    - id: 1bbbbbbb-...
+      displayName: Some Name
+      userPrincipalName: someName@example.com
+      mail: someName@example.com
+      city: Kyiv
+      department: Ops
+      jobTitle: Staff Engineer
+```
+
 ### Get Group Membership
 
 ```yaml
@@ -312,6 +351,7 @@ spec:
 | `queryInterval` | string | Optional. Minimum interval between queries as a Go duration string (e.g. `10m`, `1h`, `90s`). Skips querying Microsoft Graph until the interval has elapsed since the last successful query, independent of reconcile frequency. Only effective in Composition mode with a `status.` target. |
 | `failOnEmpty` | bool | Optional. When true, the function will fail if the `users`, `groups`, or `servicePrincipals` lists are empty, or if their respective reference fields are empty lists. |
 | `activeAccount` | bool | Optional. `UserValidation` only. When true, only users whose Entra ID `accountEnabled` attribute is true are stored at the target; disabled users, and users whose account state Graph does not report, are omitted. |
+| `additionalFields` | []string | Optional. Extra Microsoft Graph fields to include in results. Supported for all query types. Appended to the default field set for each type (see [Additional Fields](#additional-fields) section). |
 | `identity.type` | string | Optional. Type of identity credentials to use. Valid values: `AzureServicePrincipalCredentials`, `AzureWorkloadIdentityCredentials`. Default is `AzureServicePrincipalCredentials` |
 
 ## Result Targets
