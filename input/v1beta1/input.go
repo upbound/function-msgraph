@@ -95,6 +95,16 @@ type Input struct {
 	// +optional
 	ActiveAccount *bool `json:"activeAccount,omitempty"`
 
+	// AdditionalFields is a list of extra Microsoft Graph fields to include in query results.
+	// Supported for: UserValidation, GroupObjectIDs, ServicePrincipalDetails, GroupMembership.
+	// Fields are appended to the default set for each query type, e.g.:
+	//   UserValidation default:          id, displayName, userPrincipalName, mail
+	//   GroupObjectIDs default:          id, displayName, description
+	//   ServicePrincipalDetails default: id, appId, displayName, description
+	//   GroupMembership default:         id, displayName, type, mail, userPrincipalName, appId
+	// +optional
+	AdditionalFields []string `json:"additionalFields,omitempty"`
+
 	// Identity defines the type of identity used for authentication to the Microsoft Graph API.
 	Identity *Identity `json:"identity,omitempty"`
 }

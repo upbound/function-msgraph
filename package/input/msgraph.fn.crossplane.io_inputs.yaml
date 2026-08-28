@@ -30,6 +30,18 @@ spec:
               If false or unset, users are validated on existence alone.
               Only applies to the UserValidation query type.
             type: boolean
+          additionalFields:
+            description: |-
+              AdditionalFields is a list of extra Microsoft Graph fields to include in query results.
+              Supported for: UserValidation, GroupObjectIDs, ServicePrincipalDetails, GroupMembership.
+              Fields are appended to the default set for each query type, e.g.:
+                UserValidation default:          id, displayName, userPrincipalName, mail
+                GroupObjectIDs default:          id, displayName, description
+                ServicePrincipalDetails default: id, appId, displayName, description
+                GroupMembership default:         id, displayName, type, mail, userPrincipalName, appId
+            items:
+              type: string
+            type: array
           apiVersion:
             description: |-
               APIVersion defines the versioned schema of this representation of an object.
