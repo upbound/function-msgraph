@@ -728,18 +728,40 @@ func (g *GraphQuery) graphQuery(ctx context.Context, azureCreds map[string]strin
 	}
 }
 
-// validateUsers validates if the provided user principal names (emails) exist
+// resolveUserLookupField limits filters to supported Graph properties and keeps
+// the existing UPN lookup as the default for inputs that omit the new field.
+func resolveUserLookupField(field string) (string, error) {
+	switch field {
+	case "", fieldUserPrincipalName:
+		return fieldUserPrincipalName, nil
+	case fieldMail:
+		return fieldMail, nil
+	default:
+		return "", errors.Errorf("unsupported userLookupField %q: expected userPrincipalName or mail", field)
+	}
+}
+
+func ambiguousMailLookup(field string, result models.UserCollectionResponseable) bool {
+	return field == fieldMail && (len(result.GetValue()) > 1 || ptr.Deref(result.GetOdataNextLink(), "") != "")
+}
+
+// validateUsers validates whether the supplied user identifiers exist.
 func (g *GraphQuery) validateUsers(ctx context.Context, client *msgraphsdk.GraphServiceClient, in *v1beta1.Input) (interface{}, error) {
 	if in.FailOnEmpty != nil && *in.FailOnEmpty && len(in.Users) == 0 {
 		return nil, errors.New("no users provided for validation")
+	}
+
+	lookupField, err := resolveUserLookupField(in.UserLookupField)
+	if err != nil {
+		return nil, err
 	}
 
 	results := make([]interface{}, 0)
 	requireActiveAccount := ptr.Deref(in.ActiveAccount, false)
 	validExtra := g.filterSelectFields(in.AdditionalFields, (*models.User)(nil))
 
-	for _, userPrincipalName := range in.Users {
-		if userPrincipalName == nil {
+	for _, identifier := range in.Users {
+		if identifier == nil {
 			continue
 		}
 
@@ -749,7 +771,7 @@ func (g *GraphQuery) validateUsers(ctx context.Context, client *msgraphsdk.Graph
 		}
 
 		// Build filter expression
-		filterValue := fmt.Sprintf("userPrincipalName eq '%s'", *userPrincipalName)
+		filterValue := fmt.Sprintf("%s eq '%s'", lookupField, strings.ReplaceAll(*identifier, "'", "''"))
 		requestConfig.QueryParameters.Filter = &filterValue
 
 		// Use standard fields for user validation, appending any extra fields requested.
@@ -762,7 +784,13 @@ func (g *GraphQuery) validateUsers(ctx context.Context, client *msgraphsdk.Graph
 		// Execute the query
 		result, err := client.Users().Get(ctx, requestConfig)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to validate user %s", *userPrincipalName)
+			return nil, errors.Wrapf(err, "failed to validate user %s", *identifier)
+		}
+
+		// Unlike UPNs, mail addresses are not unique directory identifiers. Never
+		// turn an ambiguous mail lookup into a grant to multiple principals.
+		if ambiguousMailLookup(lookupField, result) {
+			return nil, errors.Errorf("mail lookup for %q matched multiple users", *identifier)
 		}
 
 		// Process results
