@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/upbound/function-msgraph/input/v1beta1"
 	"google.golang.org/protobuf/testing/protocmp"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/structpb"
 	"k8s.io/utils/ptr"
 
 	"github.com/crossplane/function-sdk-go/errors"
@@ -43,6 +45,7 @@ const (
 
 	// Result messages emitted per query type.
 	msgUserValidationQueryType          = `QueryType: "UserValidation"`
+	msgGroupMembershipQueryType         = `QueryType: "GroupMembership"`
 	msgGroupObjectIDsQueryType          = `QueryType: "GroupObjectIDs"`
 	msgServicePrincipalDetailsQueryType = `QueryType: "ServicePrincipalDetails"`
 )
@@ -726,7 +729,7 @@ func TestResolveGroupRef(t *testing.T) {
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "GroupMembership"`,
+							Message:  msgGroupMembershipQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -804,7 +807,7 @@ func TestResolveGroupRef(t *testing.T) {
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "GroupMembership"`,
+							Message:  msgGroupMembershipQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -893,7 +896,7 @@ func TestResolveGroupRef(t *testing.T) {
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "GroupMembership"`,
+							Message:  msgGroupMembershipQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -2656,7 +2659,7 @@ func TestRunFunction(t *testing.T) {
 					Results: []*fnv1.Result{
 						{
 							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  `QueryType: "GroupMembership"`,
+							Message:  msgGroupMembershipQueryType,
 							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
 						},
 					},
@@ -5113,6 +5116,442 @@ func TestNormalizeGraphValue(t *testing.T) {
 			}
 			if diff := cmp.Diff(tc.want, got); diff != "" {
 				t.Errorf("normalizeGraphValue(%T): -want, +got:\n%s", tc.input, diff)
+			}
+		})
+	}
+}
+
+// TestSkipQueryWhenRefMissing tests that skipQueryWhenRefMissing turns an
+// unresolvable reference into a non-fatal skip, and nothing else.
+func TestSkipQueryWhenRefMissing(t *testing.T) {
+	creds := &fnv1.CredentialData{
+		Data: map[string][]byte{
+			testCredentialsKey: []byte(`{"clientId":"c","clientSecret":"s","tenantId":"t"}`),
+		},
+	}
+	credentials := map[string]*fnv1.Credentials{
+		testAzureCredsName: {Source: &fnv1.Credentials_CredentialData{CredentialData: creds}},
+	}
+	meta := &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)}
+	successCond := &fnv1.Condition{
+		Type:   condTypeFunctionSuccess,
+		Status: fnv1.Status_STATUS_CONDITION_TRUE,
+		Reason: condReasonSuccess,
+		Target: fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+	}
+	skipCond := func(msg string) *fnv1.Condition {
+		return &fnv1.Condition{
+			Type:    "FunctionSkip",
+			Status:  fnv1.Status_STATUS_CONDITION_TRUE,
+			Reason:  "RefNotResolved",
+			Message: ptr.To(msg),
+			Target:  fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+		}
+	}
+	warning := func(msg string) *fnv1.Result {
+		return &fnv1.Result{
+			Severity: fnv1.Severity_SEVERITY_WARNING,
+			Message:  msg,
+			Target:   fnv1.Target_TARGET_COMPOSITE_AND_CLAIM.Enum(),
+		}
+	}
+	fatal := func(msg string) *fnv1.Result {
+		return &fnv1.Result{
+			Severity: fnv1.Severity_SEVERITY_FATAL,
+			Message:  msg,
+			Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+		}
+	}
+
+	// A brand-new XR: the referenced status field has not been written yet,
+	// but other status fields already exist and must be preserved.
+	newXR := `{
+		"apiVersion": "example.org/v1",
+		"kind": "XR",
+		"metadata": {"name": "cool-xr"},
+		"spec": {"count": 2},
+		"status": {"existing": "keep-me"}
+	}`
+	input := func(fields string) *structpb.Struct {
+		return resource.MustStructJSON(`{"apiVersion": "msgraph.fn.crossplane.io/v1alpha1", "kind": "Input", ` + fields + `}`)
+	}
+	xrState := func(xr string) *fnv1.State {
+		return &fnv1.State{Composite: &fnv1.Resource{Resource: resource.MustStructJSON(xr)}}
+	}
+	skipped := func(refType, refKey string) *fnv1.RunFunctionResponse {
+		return &fnv1.RunFunctionResponse{
+			Meta: meta,
+			Conditions: []*fnv1.Condition{
+				skipCond(fmt.Sprintf("Query skipped: %s %s could not be resolved yet", refType, refKey)),
+				successCond,
+			},
+			Results: []*fnv1.Result{
+				warning(fmt.Sprintf("cannot resolve %s: %s not found; skipping query (skipQueryWhenRefMissing)", refType, refKey)),
+			},
+			Desired: xrState(newXR),
+		}
+	}
+	failed := func(msg string) *fnv1.RunFunctionResponse {
+		return &fnv1.RunFunctionResponse{
+			Meta:    meta,
+			Results: []*fnv1.Result{fatal(msg)},
+			Desired: xrState(newXR),
+		}
+	}
+
+	cases := map[string]struct {
+		reason         string
+		req            *fnv1.RunFunctionRequest
+		want           *fnv1.RunFunctionResponse
+		wantGraphCalls int
+	}{
+		"GroupRefStatusMissingSkips": {
+			reason: "With the flag set, a missing groupRef status path should skip the query with a warning",
+			req: &fnv1.RunFunctionRequest{
+				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
+				Input:       input(`"queryType": "GroupMembership", "groupRef": "status.groups.owners.name", "target": "status.groupMembers", "skipQueryWhenRefMissing": true`),
+				Observed:    xrState(newXR),
+				Credentials: credentials,
+			},
+			want: skipped("groupRef", "status.groups.owners.name"),
+		},
+		"GroupRefStatusMissingSkipsWithoutRecordingTimestamp": {
+			reason: "A skipped query must not record a lastQueryTimestamps entry",
+			req: &fnv1.RunFunctionRequest{
+				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
+				Input:       input(`"queryType": "GroupMembership", "groupRef": "status.groups.owners.name", "target": "status.groupMembers", "queryInterval": "10m", "skipQueryWhenRefMissing": true`),
+				Observed:    xrState(newXR),
+				Credentials: credentials,
+			},
+			want: skipped("groupRef", "status.groups.owners.name"),
+		},
+		"GroupRefSpecMissingSkips": {
+			reason: "With the flag set, a missing groupRef spec path should skip the query with a warning",
+			req: &fnv1.RunFunctionRequest{
+				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
+				Input:       input(`"queryType": "GroupMembership", "groupRef": "spec.groupName", "target": "status.groupMembers", "skipQueryWhenRefMissing": true`),
+				Observed:    xrState(newXR),
+				Credentials: credentials,
+			},
+			want: skipped("groupRef", "spec.groupName"),
+		},
+		"GroupRefContextMissingSkips": {
+			reason: "With the flag set, a missing groupRef context path should skip the query and preserve the context",
+			req: &fnv1.RunFunctionRequest{
+				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
+				Input:       input(`"queryType": "GroupMembership", "groupRef": "context.groups.owners", "target": "context.groupMembers", "skipQueryWhenRefMissing": true`),
+				Context:     resource.MustStructJSON(`{"other": "value"}`),
+				Observed:    xrState(newXR),
+				Credentials: credentials,
+			},
+			want: func() *fnv1.RunFunctionResponse {
+				rsp := skipped("groupRef", "context.groups.owners")
+				rsp.Context = resource.MustStructJSON(`{"other": "value"}`)
+				return rsp
+			}(),
+		},
+		"GroupRefMissingWithoutFlagIsFatal": {
+			reason: "Without the flag, a missing groupRef path should stay fatal",
+			req: &fnv1.RunFunctionRequest{
+				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
+				Input:       input(`"queryType": "GroupMembership", "groupRef": "status.groups.owners.name", "target": "status.groupMembers"`),
+				Observed:    xrState(newXR),
+				Credentials: credentials,
+			},
+			want: failed("cannot resolve groupRef: status.groups.owners.name not found"),
+		},
+		"GroupRefMissingWithFlagFalseIsFatal": {
+			reason: "With the flag explicitly false, a missing groupRef path should stay fatal",
+			req: &fnv1.RunFunctionRequest{
+				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
+				Input:       input(`"queryType": "GroupMembership", "groupRef": "status.groups.owners.name", "target": "status.groupMembers", "skipQueryWhenRefMissing": false`),
+				Observed:    xrState(newXR),
+				Credentials: credentials,
+			},
+			want: failed("cannot resolve groupRef: status.groups.owners.name not found"),
+		},
+		"GroupRefNonStringValueIsFatal": {
+			reason: "With the flag set, a groupRef path holding a non-string value should stay fatal",
+			req: &fnv1.RunFunctionRequest{
+				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
+				Input:       input(`"queryType": "GroupMembership", "groupRef": "spec.count", "target": "status.groupMembers", "skipQueryWhenRefMissing": true`),
+				Observed:    xrState(newXR),
+				Credentials: credentials,
+			},
+			want: failed("cannot resolve groupRef: spec.count not found"),
+		},
+		"GroupRefPathThroughNonMapIsFatal": {
+			reason: "With the flag set, a groupRef path that traverses a non-map value should stay fatal",
+			req: &fnv1.RunFunctionRequest{
+				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
+				Input:       input(`"queryType": "GroupMembership", "groupRef": "status.existing.name", "target": "status.groupMembers", "skipQueryWhenRefMissing": true`),
+				Observed:    xrState(newXR),
+				Credentials: credentials,
+			},
+			want: failed("cannot resolve groupRef: status.existing.name not found"),
+		},
+		"GroupRefUnsupportedFormatIsFatal": {
+			reason: "With the flag set, an unsupported groupRef format is a config error and should stay fatal",
+			req: &fnv1.RunFunctionRequest{
+				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
+				Input:       input(`"queryType": "GroupMembership", "groupRef": "metadata.name", "target": "status.groupMembers", "skipQueryWhenRefMissing": true`),
+				Observed:    xrState(newXR),
+				Credentials: credentials,
+			},
+			want: failed("unsupported groupRef format: metadata.name"),
+		},
+		"GroupRefEmptyIsNotSkipped": {
+			reason: "With the flag set, an empty groupRef is ignored as today and the query fails without a group",
+			req: &fnv1.RunFunctionRequest{
+				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
+				Input:       input(`"queryType": "GroupMembership", "groupRef": "", "target": "status.groupMembers", "skipQueryWhenRefMissing": true`),
+				Observed:    xrState(newXR),
+				Credentials: credentials,
+			},
+			want:           failed("no names provided"),
+			wantGraphCalls: 1,
+		},
+		"GroupRefResolvesWithFlag": {
+			reason: "With the flag set, a resolvable groupRef should run the query and write the result as usual",
+			req: &fnv1.RunFunctionRequest{
+				Meta:  &fnv1.RequestMeta{Tag: testRequestTag},
+				Input: input(`"queryType": "GroupMembership", "groupRef": "status.groups.owners.name", "target": "status.groupMembers", "skipQueryWhenRefMissing": true`),
+				Observed: xrState(`{
+					"apiVersion": "example.org/v1", "kind": "XR", "metadata": {"name": "cool-xr"}, "spec": {"count": 2},
+					"status": {"groups": {"owners": {"name": "Owners"}}}
+				}`),
+				Credentials: credentials,
+			},
+			want: &fnv1.RunFunctionResponse{
+				Meta:       meta,
+				Conditions: []*fnv1.Condition{successCond},
+				Results: []*fnv1.Result{{
+					Severity: fnv1.Severity_SEVERITY_NORMAL,
+					Message:  msgGroupMembershipQueryType,
+					Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+				}},
+				Desired: xrState(`{
+					"apiVersion": "example.org/v1", "kind": "XR", "metadata": {"name": "cool-xr"}, "spec": {"count": 2},
+					"status": {"groups": {"owners": {"name": "Owners"}}, "groupMembers": ["Owners"]}
+				}`),
+			},
+			wantGraphCalls: 1,
+		},
+		"GroupsRefStatusMissingSkips": {
+			reason: "With the flag set, a missing groupsRef path should skip the query with a warning",
+			req: &fnv1.RunFunctionRequest{
+				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
+				Input:       input(`"queryType": "GroupObjectIDs", "groupsRef": "status.groupNames", "target": "status.groupObjectIDs", "skipQueryWhenRefMissing": true`),
+				Observed:    xrState(newXR),
+				Credentials: credentials,
+			},
+			want: skipped("groupsRef", "status.groupNames"),
+		},
+		"UsersRefSpecMissingSkips": {
+			reason: "With the flag set, a missing usersRef path should skip the query with a warning naming usersRef",
+			req: &fnv1.RunFunctionRequest{
+				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
+				Input:       input(`"queryType": "UserValidation", "usersRef": "spec.users", "target": "status.validatedUsers", "skipQueryWhenRefMissing": true`),
+				Observed:    xrState(newXR),
+				Credentials: credentials,
+			},
+			want: skipped("usersRef", "spec.users"),
+		},
+		"ServicePrincipalsRefContextMissingSkips": {
+			reason: "With the flag set, a missing servicePrincipalsRef path should skip the query with a warning naming servicePrincipalsRef",
+			req: &fnv1.RunFunctionRequest{
+				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
+				Input:       input(`"queryType": "ServicePrincipalDetails", "servicePrincipalsRef": "context.sps", "target": "status.servicePrincipals", "skipQueryWhenRefMissing": true`),
+				Observed:    xrState(newXR),
+				Credentials: credentials,
+			},
+			want: skipped("servicePrincipalsRef", "context.sps"),
+		},
+		"GroupsRefMissingWithoutFlagIsFatal": {
+			reason: "Without the flag, a missing groupsRef path should stay fatal",
+			req: &fnv1.RunFunctionRequest{
+				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
+				Input:       input(`"queryType": "GroupObjectIDs", "groupsRef": "status.groupNames", "target": "status.groupObjectIDs"`),
+				Observed:    xrState(newXR),
+				Credentials: credentials,
+			},
+			want: failed("cannot resolve groupsRef: status.groupNames not found"),
+		},
+		"UsersRefMissingWithoutFlagIsFatal": {
+			reason: "Without the flag, a missing usersRef path should stay fatal",
+			req: &fnv1.RunFunctionRequest{
+				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
+				Input:       input(`"queryType": "UserValidation", "usersRef": "spec.users", "target": "status.validatedUsers", "skipQueryWhenRefMissing": false`),
+				Observed:    xrState(newXR),
+				Credentials: credentials,
+			},
+			want: failed("cannot resolve usersRef: spec.users not found"),
+		},
+		"ServicePrincipalsRefMissingWithoutFlagIsFatal": {
+			reason: "Without the flag, a missing servicePrincipalsRef path should stay fatal",
+			req: &fnv1.RunFunctionRequest{
+				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
+				Input:       input(`"queryType": "ServicePrincipalDetails", "servicePrincipalsRef": "context.sps", "target": "status.servicePrincipals"`),
+				Observed:    xrState(newXR),
+				Credentials: credentials,
+			},
+			want: failed("cannot resolve servicePrincipalsRef: context.sps not found"),
+		},
+		"GroupsRefNotStringArrayIsFatal": {
+			reason: "With the flag set, a groupsRef path holding a non-array value should stay fatal",
+			req: &fnv1.RunFunctionRequest{
+				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
+				Input:       input(`"queryType": "GroupObjectIDs", "groupsRef": "status.existing", "target": "status.groupObjectIDs", "skipQueryWhenRefMissing": true`),
+				Observed:    xrState(newXR),
+				Credentials: credentials,
+			},
+			want: failed("cannot resolve groupsRef: status.existing not a string array"),
+		},
+		"UsersRefNotAMapIsFatal": {
+			reason: "With the flag set, a usersRef path that traverses a non-map value should stay fatal",
+			req: &fnv1.RunFunctionRequest{
+				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
+				Input:       input(`"queryType": "UserValidation", "usersRef": "status.existing.list", "target": "status.validatedUsers", "skipQueryWhenRefMissing": true`),
+				Observed:    xrState(newXR),
+				Credentials: credentials,
+			},
+			want: failed("cannot resolve usersRef: status.existing.list not a map"),
+		},
+		"ServicePrincipalsRefNotStringArrayIsFatal": {
+			reason: "With the flag set, a servicePrincipalsRef path holding a non-array value should stay fatal",
+			req: &fnv1.RunFunctionRequest{
+				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
+				Input:       input(`"queryType": "ServicePrincipalDetails", "servicePrincipalsRef": "spec.count", "target": "status.servicePrincipals", "skipQueryWhenRefMissing": true`),
+				Observed:    xrState(newXR),
+				Credentials: credentials,
+			},
+			want: failed("cannot resolve servicePrincipalsRef: spec.count not a string array"),
+		},
+		"GroupsRefUnsupportedFormatIsFatal": {
+			reason: "With the flag set, an unsupported groupsRef format is a config error and should stay fatal",
+			req: &fnv1.RunFunctionRequest{
+				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
+				Input:       input(`"queryType": "GroupObjectIDs", "groupsRef": "groupNames", "target": "status.groupObjectIDs", "skipQueryWhenRefMissing": true`),
+				Observed:    xrState(newXR),
+				Credentials: credentials,
+			},
+			want: failed("unsupported groupsRef format: groupNames"),
+		},
+		"UsersRefEmptyIsNotSkipped": {
+			reason: "With the flag set, an empty usersRef is ignored as today and the query fails without users",
+			req: &fnv1.RunFunctionRequest{
+				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
+				Input:       input(`"queryType": "UserValidation", "usersRef": "", "target": "status.validatedUsers", "skipQueryWhenRefMissing": true`),
+				Observed:    xrState(newXR),
+				Credentials: credentials,
+			},
+			want:           failed("no names provided"),
+			wantGraphCalls: 1,
+		},
+		"ArrayRefsResolveWithFlag": {
+			reason: "With the flag set, a resolvable usersRef should run the query and write the result as usual",
+			req: &fnv1.RunFunctionRequest{
+				Meta:  &fnv1.RequestMeta{Tag: testRequestTag},
+				Input: input(`"queryType": "UserValidation", "usersRef": "spec.users", "target": "status.validatedUsers", "skipQueryWhenRefMissing": true`),
+				Observed: xrState(`{
+					"apiVersion": "example.org/v1", "kind": "XR", "metadata": {"name": "cool-xr"},
+					"spec": {"users": ["a@example.com", "b@example.com"]}
+				}`),
+				Credentials: credentials,
+			},
+			want: &fnv1.RunFunctionResponse{
+				Meta:       meta,
+				Conditions: []*fnv1.Condition{successCond},
+				Results: []*fnv1.Result{{
+					Severity: fnv1.Severity_SEVERITY_NORMAL,
+					Message:  msgUserValidationQueryType,
+					Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+				}},
+				Desired: xrState(`{
+					"apiVersion": "example.org/v1", "kind": "XR", "metadata": {"name": "cool-xr"},
+					"spec": {"users": ["a@example.com", "b@example.com"]},
+					"status": {"validatedUsers": ["a@example.com", "b@example.com"]}
+				}`),
+			},
+			wantGraphCalls: 1,
+		},
+		"OperationGroupRefMissingSkipsWithoutAnnotations": {
+			reason: "In Operation mode, a skipped query must not fail or update the drift annotations",
+			req: &fnv1.RunFunctionRequest{
+				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
+				Input:       input(`"queryType": "GroupMembership", "groupRef": "status.groups.owners.name", "target": "status.groupMembers", "skipQueryWhenRefMissing": true`),
+				Credentials: credentials,
+				RequiredResources: map[string]*fnv1.Resources{
+					watchedResourceKey: {Items: []*fnv1.Resource{{Resource: resource.MustStructJSON(`{
+						"apiVersion": "example.org/v1", "kind": "XR",
+						"metadata": {
+							"name": "cool-xr",
+							"finalizers": ["composite.apiextensions.crossplane.io"],
+							"annotations": {"function-msgraph/last-execution-query-drift-detected": "true"}
+						},
+						"spec": {"count": 2},
+						"status": {"existing": "keep-me"}
+					}`)}}},
+				},
+			},
+			want: &fnv1.RunFunctionResponse{
+				Meta: meta,
+				Conditions: []*fnv1.Condition{
+					skipCond("Query skipped: groupRef status.groups.owners.name could not be resolved yet"),
+					successCond,
+				},
+				Results: []*fnv1.Result{
+					warning("cannot resolve groupRef: status.groups.owners.name not found; skipping query (skipQueryWhenRefMissing)"),
+				},
+				Desired: xrState(`{
+					"apiVersion": "example.org/v1", "kind": "XR",
+					"metadata": {
+						"name": "cool-xr",
+						"annotations": {"function-msgraph/last-execution-query-drift-detected": "true"}
+					}
+				}`),
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			graphCalls := 0
+			mockQuery := &MockGraphQuery{
+				// Echoes the resolved names so tests can see what the ref resolved to.
+				GraphQueryFunc: func(_ context.Context, _ map[string]string, in *v1beta1.Input) (interface{}, error) {
+					graphCalls++
+					names := slices.Concat(in.Groups, in.Users, in.ServicePrincipals)
+					if in.Group != nil && *in.Group != "" {
+						names = append(names, in.Group)
+					}
+					if len(names) == 0 {
+						return nil, errors.New("no names provided")
+					}
+					results := make([]interface{}, 0, len(names))
+					for _, n := range names {
+						results = append(results, *n)
+					}
+					return results, nil
+				},
+			}
+
+			f := &Function{
+				graphQuery: mockQuery,
+				timer:      &MockTimer{},
+				log:        logging.NewNopLogger(),
+			}
+			rsp, err := f.RunFunction(context.Background(), tc.req)
+			if err != nil {
+				t.Fatalf("%s\nf.RunFunction(...): unexpected error: %v", tc.reason, err)
+			}
+
+			if diff := cmp.Diff(tc.want, rsp, protocmp.Transform()); diff != "" {
+				t.Errorf("%s\nf.RunFunction(...): -want rsp, +got rsp:\n%s", tc.reason, diff)
+			}
+
+			if graphCalls != tc.wantGraphCalls {
+				t.Errorf("%s\nMicrosoft Graph calls: want %d, got %d", tc.reason, tc.wantGraphCalls, graphCalls)
 			}
 		})
 	}

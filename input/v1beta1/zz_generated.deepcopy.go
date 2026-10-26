@@ -91,6 +91,11 @@ func (in *Input) DeepCopyInto(out *Input) {
 		*out = new(bool)
 		**out = **in
 	}
+	if in.SkipQueryWhenRefMissing != nil {
+		in, out := &in.SkipQueryWhenRefMissing, &out.SkipQueryWhenRefMissing
+		*out = new(bool)
+		**out = **in
+	}
 	if in.QueryInterval != nil {
 		in, out := &in.QueryInterval, &out.QueryInterval
 		*out = new(string)

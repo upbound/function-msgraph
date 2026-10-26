@@ -83,6 +83,10 @@ const (
 	unknownType          = "unknown"
 )
 
+// errRefNotFound marks a reference whose path does not exist. Its text keeps
+// the existing "cannot resolve ...: <ref> not found" messages unchanged.
+var errRefNotFound = errors.New("not found")
+
 // graphFieldNameRE matches the shape of a Microsoft Graph property name,
 // including OData extension attributes (extension_<appId>_<name>).
 var graphFieldNameRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
@@ -1168,31 +1172,48 @@ func ParseNestedKey(key string) ([]string, error) {
 
 // GetNestedKey retrieves a nested string value from a map using dot notation keys.
 func GetNestedKey(context map[string]interface{}, key string) (string, bool) {
-	parts, err := ParseNestedKey(key)
+	value, err := lookupNestedValue(context, key)
 	if err != nil {
 		return "", false
 	}
+	result, ok := value.(string)
+	return result, ok
+}
 
-	currentValue := interface{}(context)
+// lookupNestedValue returns the value at a nested key. It returns
+// errRefNotFound only when a key along the path is absent.
+func lookupNestedValue(root map[string]interface{}, key string) (interface{}, error) {
+	parts, err := ParseNestedKey(key)
+	if err != nil {
+		return nil, err
+	}
+
+	currentValue := interface{}(root)
 	for _, k := range parts {
-		// Check if the current value is a map
-		if nestedMap, ok := currentValue.(map[string]interface{}); ok {
-			// Get the next value in the nested map
-			if nextValue, exists := nestedMap[k]; exists {
-				currentValue = nextValue
-			} else {
-				return "", false
-			}
-		} else {
-			return "", false
+		nestedMap, ok := currentValue.(map[string]interface{})
+		if !ok {
+			return nil, errors.Errorf("%s is not a map", k)
 		}
+		nextValue, exists := nestedMap[k]
+		if !exists {
+			return nil, errRefNotFound
+		}
+		currentValue = nextValue
 	}
+	return currentValue, nil
+}
 
-	// Convert the final value to a string
-	if result, ok := currentValue.(string); ok {
-		return result, true
+// resolveGroupRefValue resolves a groupRef string value from a map.
+func resolveGroupRefValue(data map[string]interface{}, field, refKey string) (string, error) {
+	value, err := lookupNestedValue(data, field)
+	if errors.Is(err, errRefNotFound) {
+		return "", errors.Errorf("cannot resolve groupRef: %s %w", refKey, errRefNotFound)
 	}
-	return "", false
+	result, ok := value.(string)
+	if err != nil || !ok {
+		return "", errors.Errorf("cannot resolve groupRef: %s not found", refKey)
+	}
+	return result, nil
 }
 
 // SetNestedKey sets a value to a nested key from a map using dot notation keys.
@@ -1531,7 +1552,7 @@ func (f *Function) processGroupRef(req *fnv1.RunFunctionRequest, in *v1beta1.Inp
 
 	groupName, err := f.resolveGroupRef(req, in.GroupRef, inOperation)
 	if err != nil {
-		response.Fatal(rsp, err)
+		f.failOrSkipOnRef(in, rsp, "groupRef", *in.GroupRef, err)
 		return false
 	}
 	in.Group = &groupName
@@ -1547,7 +1568,7 @@ func (f *Function) processGroupsRef(req *fnv1.RunFunctionRequest, in *v1beta1.In
 
 	groupNames, err := f.resolveGroupsRef(req, in.GroupsRef, inOperation)
 	if err != nil {
-		response.Fatal(rsp, err)
+		f.failOrSkipOnRef(in, rsp, "groupsRef", *in.GroupsRef, err)
 		return false
 	}
 	in.Groups = groupNames
@@ -1563,7 +1584,7 @@ func (f *Function) processUsersRef(req *fnv1.RunFunctionRequest, in *v1beta1.Inp
 
 	userNames, err := f.resolveUsersRef(req, in.UsersRef, inOperation)
 	if err != nil {
-		response.Fatal(rsp, err)
+		f.failOrSkipOnRef(in, rsp, "usersRef", *in.UsersRef, err)
 		return false
 	}
 	in.Users = userNames
@@ -1579,12 +1600,31 @@ func (f *Function) processServicePrincipalsRef(req *fnv1.RunFunctionRequest, in 
 
 	spNames, err := f.resolveServicePrincipalsRef(req, in.ServicePrincipalsRef, inOperation)
 	if err != nil {
-		response.Fatal(rsp, err)
+		f.failOrSkipOnRef(in, rsp, "servicePrincipalsRef", *in.ServicePrincipalsRef, err)
 		return false
 	}
 	in.ServicePrincipals = spNames
 	f.log.Info("Resolved ServicePrincipalsRef to service principals", "spCount", len(spNames), "servicePrincipalsRef", *in.ServicePrincipalsRef)
 	return true
+}
+
+// failOrSkipOnRef reports a reference resolution error. With
+// skipQueryWhenRefMissing set, a missing reference path skips the query with a
+// warning instead of failing; every other error remains fatal.
+func (f *Function) failOrSkipOnRef(in *v1beta1.Input, rsp *fnv1.RunFunctionResponse, refType, refKey string, err error) {
+	if !ptr.Deref(in.SkipQueryWhenRefMissing, false) || !errors.Is(err, errRefNotFound) {
+		response.Fatal(rsp, err)
+		return
+	}
+
+	f.log.Info("Reference not resolvable yet, skipping query", refType, refKey)
+	response.Warning(rsp, errors.Errorf("%s; skipping query (skipQueryWhenRefMissing)", err.Error())).
+		TargetCompositeAndClaim()
+	response.ConditionTrue(rsp, "FunctionSkip", "RefNotResolved").
+		WithMessage(fmt.Sprintf("Query skipped: %s %s could not be resolved yet", refType, refKey)).
+		TargetCompositeAndClaim()
+	response.ConditionTrue(rsp, "FunctionSuccess", "Success").
+		TargetCompositeAndClaim()
 }
 
 // executeAndProcessQuery executes the query and processes the results
@@ -1818,22 +1858,14 @@ func (f *Function) resolveFromStatus(req *fnv1.RunFunctionRequest, refKey string
 	}
 
 	statusField := strings.TrimPrefix(refKey, "status.")
-	value, ok := GetNestedKey(xrStatus, statusField)
-	if !ok {
-		return "", errors.Errorf("cannot resolve groupRef: %s not found", refKey)
-	}
-	return value, nil
+	return resolveGroupRefValue(xrStatus, statusField, refKey)
 }
 
 // resolveFromContext resolves a reference from function context
 func (f *Function) resolveFromContext(req *fnv1.RunFunctionRequest, refKey string) (string, error) {
 	contextMap := req.GetContext().AsMap()
 	contextField := strings.TrimPrefix(refKey, "context.")
-	value, ok := GetNestedKey(contextMap, contextField)
-	if !ok {
-		return "", errors.Errorf("cannot resolve groupRef: %s not found", refKey)
-	}
-	return value, nil
+	return resolveGroupRefValue(contextMap, contextField, refKey)
 }
 
 // resolveFromSpec resolves a reference from XR spec
@@ -1852,11 +1884,7 @@ func (f *Function) resolveFromSpec(req *fnv1.RunFunctionRequest, refKey string, 
 	}
 
 	specField := strings.TrimPrefix(refKey, "spec.")
-	value, ok := GetNestedKey(xrSpec, specField)
-	if !ok {
-		return "", errors.Errorf("cannot resolve groupRef: %s not found", refKey)
-	}
-	return value, nil
+	return resolveGroupRefValue(xrSpec, specField, refKey)
 }
 
 // resolveStringArrayRef resolves a list of string values from a reference in spec, status or context
@@ -1887,8 +1915,12 @@ func (f *Function) resolveStringArrayRef(req *fnv1.RunFunctionRequest, ref *stri
 	// If we got an error and it contains "groupsRef" but we're looking for a different ref type,
 	// replace it with the correct ref type
 	if err != nil && refType != "groupsRef" && strings.Contains(err.Error(), "groupsRef") {
-		errMsg := err.Error()
-		return nil, errors.New(strings.ReplaceAll(errMsg, "groupsRef", refType))
+		errMsg := strings.ReplaceAll(err.Error(), "groupsRef", refType)
+		if errors.Is(err, errRefNotFound) {
+			// Re-wrap so the sentinel survives the rewrite; the message is unchanged.
+			return nil, errors.Errorf("%s%w", strings.TrimSuffix(errMsg, errRefNotFound.Error()), errRefNotFound)
+		}
+		return nil, errors.New(errMsg)
 	}
 
 	return result, err
@@ -1958,7 +1990,7 @@ func (f *Function) extractStringArrayFromMap(dataMap map[string]interface{}, fie
 			if nextValue, exists := nestedMap[k]; exists {
 				currentValue = nextValue
 			} else {
-				return nil, errors.Errorf("cannot resolve groupsRef: %s not found", refKey)
+				return nil, errors.Errorf("cannot resolve groupsRef: %s %w", refKey, errRefNotFound)
 			}
 		} else {
 			return nil, errors.Errorf("cannot resolve groupsRef: %s not a map", refKey)
