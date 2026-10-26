@@ -163,6 +163,38 @@ spec:
           name: azure-account-creds
 ```
 
+#### Look up users by mail
+
+A B2B guest's `mail` can differ from their tenant-specific `userPrincipalName`.
+Set `userLookupField: mail` to resolve the mail address directly without deriving
+or maintaining a guest UPN:
+
+```yaml
+queryType: UserValidation
+userLookupField: mail
+users:
+  - developer@example.com
+target: status.validatedUsers
+```
+
+This also works with `usersRef`. The default remains `userPrincipalName`, and
+the result retains both the actual `mail` and `userPrincipalName` properties.
+Only `userPrincipalName` and `mail` are accepted lookup fields. Values are
+escaped as OData string literals rather than interpolated as filter expressions.
+
+Mail addresses are not unique directory identifiers: if a mail query returns
+multiple users, the function fails rather than returning multiple principals
+for one requested owner. If no user matches, the result remains empty, as for
+existing UPN lookups. `failOnEmpty` checks the input list, not missing matches;
+consuming compositions must check for the expected number of resolved users
+before applying grants.
+
+Existing `activeAccount`, `queryInterval` and `skipQueryWhenTargetHasData`
+behavior is unchanged. Cached results are not automatically invalidated by a
+change to the lookup field; when changing it on an existing XR, force a fresh
+query (for example by disabling the skip flag for one reconcile and waiting
+for any configured query interval).
+
 #### Only Active (Enabled) Accounts
 
 By default a user is validated on existence alone, so a disabled (for example
@@ -338,7 +370,8 @@ spec:
 | Field | Type | Description |
 |-------|------|-------------|
 | `queryType` | string | Required. Type of query to perform. Valid values: `UserValidation`, `GroupMembership`, `GroupObjectIDs`, `ServicePrincipalDetails` |
-| `users` | []string | List of user principal names (email IDs) for user validation |
+| `users` | []string | List of user identifiers for validation, matched against `userLookupField` |
+| `userLookupField` | string | `UserValidation` only. Property to match: `userPrincipalName` (default) or `mail`. Mail queries fail if multiple users match. |
 | `usersRef` | string | Reference to resolve a list of user names from `spec`, `status` or `context` (e.g., `spec.userAccess.emails`) |
 | `group` | string | Single group name for group membership queries |
 | `groupRef` | string | Reference to resolve a single group name from `spec`, `status` or `context` (e.g., `spec.groupConfig.name`) |

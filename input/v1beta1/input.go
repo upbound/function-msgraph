@@ -23,9 +23,17 @@ type Input struct {
 	// Supported values: UserValidation, GroupMembership, GroupObjectIDs, ServicePrincipalDetails
 	QueryType string `json:"queryType"`
 
-	// Users is a list of userPrincipalName (email IDs) for user validation
+	// Users is a list of user identifiers for user validation, matched against UserLookupField.
 	// +optional
 	Users []*string `json:"users,omitempty"`
+
+	// UserLookupField selects the Microsoft Graph property used by UserValidation.
+	// Defaults to userPrincipalName when omitted. Set to mail to look up users
+	// whose mail differs from their UPN, such as B2B guests. Mail lookups fail
+	// when more than one user matches. This field does not affect other query types.
+	// +kubebuilder:validation:Enum=userPrincipalName;mail
+	// +optional
+	UserLookupField string `json:"userLookupField,omitempty"`
 
 	// UsersRef is a reference to retrieve the user names (e.g., from status or context)
 	// Overrides Users field if used
