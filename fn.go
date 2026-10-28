@@ -359,7 +359,11 @@ func (f *Function) parseInputAndCredentials(req *fnv1.RunFunctionRequest, rsp *f
 		return nil, nil, err
 	}
 
-	azureCreds, err := getCreds(req)
+	// Workload identity can run on what the AKS webhook injects into the pod
+	// (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_FEDERATED_TOKEN_FILE), so its
+	// credentials Secret is optional.
+	required := in.Identity == nil || in.Identity.Type != v1beta1.IdentityTypeAzureWorkloadIdentityCredentials
+	azureCreds, err := getCreds(req, required)
 	if err != nil {
 		response.Fatal(rsp, err)
 		return nil, nil, err
@@ -596,7 +600,7 @@ func (f *Function) processResults(req *fnv1.RunFunctionRequest, in *v1beta1.Inpu
 	return nil
 }
 
-func getCreds(req *fnv1.RunFunctionRequest) (map[string]string, error) {
+func getCreds(req *fnv1.RunFunctionRequest, required bool) (map[string]string, error) {
 	var azureCreds map[string]string
 	rawCreds := req.GetCredentials()
 
@@ -608,7 +612,7 @@ func getCreds(req *fnv1.RunFunctionRequest) (map[string]string, error) {
 				return nil, errors.Wrap(err, "cannot parse json credentials")
 			}
 		}
-	} else {
+	} else if required {
 		return nil, errors.New("failed to get azure-creds credentials")
 	}
 
