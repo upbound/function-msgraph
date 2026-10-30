@@ -1903,49 +1903,38 @@ func (f *Function) resolveStringArrayRef(req *fnv1.RunFunctionRequest, ref *stri
 	// Use proper switch statement instead of if-else chain
 	switch {
 	case strings.HasPrefix(refKey, "status."):
-		result, err = f.resolveStringArrayFromStatus(req, refKey, inOperation)
+		result, err = f.resolveStringArrayFromStatus(req, refKey, refType, inOperation)
 	case strings.HasPrefix(refKey, "context."):
-		result, err = f.resolveStringArrayFromContext(req, refKey)
+		result, err = f.resolveStringArrayFromContext(req, refKey, refType)
 	case strings.HasPrefix(refKey, "spec."):
-		result, err = f.resolveStringArrayFromSpec(req, refKey, inOperation)
+		result, err = f.resolveStringArrayFromSpec(req, refKey, refType, inOperation)
 	default:
 		return nil, errors.Errorf("unsupported %s format: %s", refType, refKey)
-	}
-
-	// If we got an error and it contains "groupsRef" but we're looking for a different ref type,
-	// replace it with the correct ref type
-	if err != nil && refType != "groupsRef" && strings.Contains(err.Error(), "groupsRef") {
-		errMsg := strings.ReplaceAll(err.Error(), "groupsRef", refType)
-		if errors.Is(err, errRefNotFound) {
-			// Re-wrap so the sentinel survives the rewrite; the message is unchanged.
-			return nil, errors.Errorf("%s%w", strings.TrimSuffix(errMsg, errRefNotFound.Error()), errRefNotFound)
-		}
-		return nil, errors.New(errMsg)
 	}
 
 	return result, err
 }
 
 // resolveStringArrayFromStatus resolves a list of string values from XR status
-func (f *Function) resolveStringArrayFromStatus(req *fnv1.RunFunctionRequest, refKey string, inOperation bool) ([]*string, error) {
+func (f *Function) resolveStringArrayFromStatus(req *fnv1.RunFunctionRequest, refKey, refType string, inOperation bool) ([]*string, error) {
 	xrStatus, _, err := f.getOXRAndStatus(req, inOperation)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot get XR status")
 	}
 
 	statusField := strings.TrimPrefix(refKey, "status.")
-	return f.extractStringArrayFromMap(xrStatus, statusField, refKey)
+	return f.extractStringArrayFromMap(xrStatus, statusField, refKey, refType)
 }
 
 // resolveStringArrayFromContext resolves a list of string values from function context
-func (f *Function) resolveStringArrayFromContext(req *fnv1.RunFunctionRequest, refKey string) ([]*string, error) {
+func (f *Function) resolveStringArrayFromContext(req *fnv1.RunFunctionRequest, refKey, refType string) ([]*string, error) {
 	contextMap := req.GetContext().AsMap()
 	contextField := strings.TrimPrefix(refKey, "context.")
-	return f.extractStringArrayFromMap(contextMap, contextField, refKey)
+	return f.extractStringArrayFromMap(contextMap, contextField, refKey, refType)
 }
 
 // resolveStringArrayFromSpec resolves a list of string values from XR spec
-func (f *Function) resolveStringArrayFromSpec(req *fnv1.RunFunctionRequest, refKey string, inOperation bool) ([]*string, error) {
+func (f *Function) resolveStringArrayFromSpec(req *fnv1.RunFunctionRequest, refKey, refType string, inOperation bool) ([]*string, error) {
 	_, oxr, err := f.getOXRAndStatus(req, inOperation)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot get XR status and observed XR")
@@ -1959,7 +1948,7 @@ func (f *Function) resolveStringArrayFromSpec(req *fnv1.RunFunctionRequest, refK
 	}
 
 	specField := strings.TrimPrefix(refKey, "spec.")
-	return f.extractStringArrayFromMap(xrSpec, specField, refKey)
+	return f.extractStringArrayFromMap(xrSpec, specField, refKey, refType)
 }
 
 // resolveGroupsRef resolves a list of group names from a reference in status or context
@@ -1978,7 +1967,7 @@ func (f *Function) resolveServicePrincipalsRef(req *fnv1.RunFunctionRequest, ser
 }
 
 // extractStringArrayFromMap extracts a string array from a map using nested key
-func (f *Function) extractStringArrayFromMap(dataMap map[string]interface{}, field, refKey string) ([]*string, error) {
+func (f *Function) extractStringArrayFromMap(dataMap map[string]interface{}, field, refKey, refType string) ([]*string, error) {
 	parts, err := ParseNestedKey(field)
 	if err != nil {
 		return nil, errors.Wrap(err, "invalid field key")
@@ -1990,10 +1979,10 @@ func (f *Function) extractStringArrayFromMap(dataMap map[string]interface{}, fie
 			if nextValue, exists := nestedMap[k]; exists {
 				currentValue = nextValue
 			} else {
-				return nil, errors.Errorf("cannot resolve groupsRef: %s %w", refKey, errRefNotFound)
+				return nil, errors.Errorf("cannot resolve %s: %s %w", refType, refKey, errRefNotFound)
 			}
 		} else {
-			return nil, errors.Errorf("cannot resolve groupsRef: %s not a map", refKey)
+			return nil, errors.Errorf("cannot resolve %s: %s not a map", refType, refKey)
 		}
 	}
 
@@ -2009,5 +1998,5 @@ func (f *Function) extractStringArrayFromMap(dataMap map[string]interface{}, fie
 		return result, nil
 	}
 
-	return nil, errors.Errorf("cannot resolve groupsRef: %s not a string array", refKey)
+	return nil, errors.Errorf("cannot resolve %s: %s not a string array", refType, refKey)
 }
