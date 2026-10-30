@@ -348,6 +348,7 @@ spec:
 | `servicePrincipalsRef` | string | Reference to resolve a list of service principal names from `spec`, `status` or `context` (e.g., `spec.servicePrincipalConfig.names`) |
 | `target` | string | Required. Where to store the query results. Can be `status.<field>` or `context.<field>` |
 | `skipQueryWhenTargetHasData` | bool | Optional. When true, will skip the query if the target already has data |
+| `skipQueryWhenRefMissing` | bool | Optional. When true, a `groupRef`, `groupsRef`, `usersRef` or `servicePrincipalsRef` whose path does not exist yet skips the query with a warning instead of failing the pipeline. The target is left untouched. Default is false. See [Skipping when a reference is not resolvable yet](#skipping-when-a-reference-is-not-resolvable-yet). |
 | `queryInterval` | string | Optional. Minimum interval between queries as a Go duration string (e.g. `10m`, `1h`, `90s`). Skips querying Microsoft Graph until the interval has elapsed since the last successful query, independent of reconcile frequency. Only effective in Composition mode with a `status.` target. |
 | `failOnEmpty` | bool | Optional. When true, the function will fail if the `users`, `groups`, or `servicePrincipals` lists are empty, or if their respective reference fields are empty lists. |
 | `activeAccount` | bool | Optional. `UserValidation` only. When true, only users whose Entra ID `accountEnabled` attribute is true are stored at the target; disabled users, and users whose account state Graph does not report, are omitted. |
@@ -470,6 +471,39 @@ queryType: ServicePrincipalDetails
 servicePrincipalsRef: "spec.servicePrincipalConfig.names"  # Get service principal names from XR spec
 target: "status.servicePrincipals"
 ```
+
+### Skipping when a reference is not resolvable yet
+
+By default, a reference whose path does not exist is a fatal error, which aborts
+the whole Composition pipeline. That can deadlock an XR when the referenced field
+is written later in the pipeline or on a later reconcile, for example when a
+later step creates the Entra ID group and records its name in the XR status.
+
+Set `skipQueryWhenRefMissing: true` to skip the query instead:
+
+```yaml
+apiVersion: msgraph.fn.crossplane.io/v1alpha1
+kind: Input
+queryType: GroupMembership
+groupRef: "status.groups.owners.name"  # Written by a later step once the group exists
+target: "status.ownerMembers"
+skipQueryWhenRefMissing: true
+```
+
+While the path is missing, the function does not call Microsoft Graph, leaves the
+target untouched, passes the desired XR and context through unchanged, emits a
+Warning result and sets a `FunctionSkip` condition with reason `RefNotResolved`.
+The rest of the pipeline runs, and the query runs on the first reconcile where the
+reference resolves. In Operation mode, a skipped run does not update the drift
+annotations.
+
+Only a missing path is skipped. These remain fatal even with the flag set:
+
+- an empty or unsupported reference (for example one that does not start with
+  `spec.`, `status.` or `context.`)
+- a path that exists but holds the wrong type (not a map, not a string array, or
+  a non-string value for `groupRef`)
+- any Microsoft Graph error, including a group that does not exist
 
 ## Using data from EnvironmentConfig
 

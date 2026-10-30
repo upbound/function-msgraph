@@ -67,6 +67,14 @@ type Input struct {
 	// +optional
 	SkipQueryWhenTargetHasData *bool `json:"skipQueryWhenTargetHasData,omitempty"`
 
+	// SkipQueryWhenRefMissing skips the query instead of failing when a reference
+	// (groupRef, groupsRef, usersRef, servicePrincipalsRef) points at a field that
+	// does not exist yet. The target is left untouched. Useful when the referenced
+	// field is populated later in the pipeline or on a later reconcile.
+	// Default is false (unresolvable references are fatal).
+	// +optional
+	SkipQueryWhenRefMissing *bool `json:"skipQueryWhenRefMissing,omitempty"`
+
 	// QueryInterval is an optional minimum interval between queries, expressed as
 	// a Go duration string (for example "10m", "1h" or "90s"). When set, the
 	// function records the timestamp of its last successful query alongside the
