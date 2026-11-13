@@ -157,3 +157,13 @@ crossplane render xr.yaml user-validation-example.yaml functions.yaml --function
 ```
 
 > The example intentionally omits `skipQueryWhenTargetHasData`. Enabling `activeAccount` on an XR whose target already holds disabled users does not purge them while the query is being skipped, so clear the target once (or drop the skip for one reconcile) when adopting the flag on an existing deployment.
+
+### 7. Skip When a Reference Is Missing
+
+With `skipQueryWhenRefMissing: true`, a reference whose path does not exist yet skips the query instead of failing the pipeline. `xr.yaml` has no `status.ownersGroup.name`, so the render below emits a Warning result and a `FunctionSkip`/`RefNotResolved` condition, makes no Graph call and leaves `status.ownerMembers` unset:
+
+```shell
+crossplane render xr.yaml group-membership-example-skip-ref-missing.yaml functions.yaml --function-credentials=./secrets/azure-creds.yaml -r
+```
+
+Remove `skipQueryWhenRefMissing` from the example to see the default, fatal `cannot resolve groupRef: status.ownersGroup.name not found`.

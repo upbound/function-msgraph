@@ -122,6 +122,14 @@ spec:
               ServicePrincipalsRef is a reference to retrieve the service principal names (e.g., from status or context)
               Overrides ServicePrincipals field if used
             type: string
+          skipQueryWhenRefMissing:
+            description: |-
+              SkipQueryWhenRefMissing skips the query instead of failing when a reference
+              (groupRef, groupsRef, usersRef, servicePrincipalsRef) points at a field that
+              does not exist yet. The target is left untouched. Useful when the referenced
+              field is populated later in the pipeline or on a later reconcile.
+              Default is false (unresolvable references are fatal).
+            type: boolean
           skipQueryWhenTargetHasData:
             description: |-
               SkipQueryWhenTargetHasData controls whether to skip the query when the target already has data
