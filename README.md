@@ -182,6 +182,11 @@ the result retains both the actual `mail` and `userPrincipalName` properties.
 Only `userPrincipalName` and `mail` are accepted lookup fields. Values are
 escaped as OData string literals rather than interpolated as filter expressions.
 
+For backward compatibility, UPN lookups (default or explicit) treat doubled
+apostrophes in the input as one apostrophe before escaping: both
+`o'brien@example.com` and `o''brien@example.com` search for `o'brien@example.com`.
+Mail inputs remain literal: two apostrophes are preserved as two apostrophes.
+
 Mail addresses are not unique directory identifiers: if a mail query returns
 multiple users, the function fails rather than returning multiple principals
 for one requested owner. If no user matches, the result remains empty, as for

@@ -48,6 +48,15 @@ func TestValidateUsersLookupField(t *testing.T) {
 		"EscapesUPNLiteral": {
 			identifier: "o'connor@example.com", filter: "userPrincipalName eq 'o''connor@example.com'", body: guest, wantCount: 1,
 		},
+		"PreEscapedDefaultUPN": {
+			identifier: "o''connor@example.com", filter: "userPrincipalName eq 'o''connor@example.com'", body: guest, wantCount: 1,
+		},
+		"PreEscapedExplicitUPN": {
+			field: fieldUserPrincipalName, identifier: "o''connor@example.com", filter: "userPrincipalName eq 'o''connor@example.com'", body: guest, wantCount: 1,
+		},
+		"PreservesDoubledMailApostrophes": {
+			field: fieldMail, identifier: "o''connor@example.com", filter: "mail eq 'o''''connor@example.com'", body: guest, wantCount: 1,
+		},
 		"NoMatchPreservesEmptyResult": {
 			field: fieldMail, identifier: "missing@example.com", filter: "mail eq 'missing@example.com'",
 		},

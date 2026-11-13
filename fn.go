@@ -770,8 +770,12 @@ func (g *GraphQuery) validateUsers(ctx context.Context, client *msgraphsdk.Graph
 			QueryParameters: &users.UsersRequestBuilderGetQueryParameters{},
 		}
 
-		// Build filter expression
-		filterValue := fmt.Sprintf("%s eq '%s'", lookupField, strings.ReplaceAll(*identifier, "'", "''"))
+		// Preserve support for pre-escaped UPN inputs accepted by the released filter.
+		lookupValue := *identifier
+		if lookupField == fieldUserPrincipalName {
+			lookupValue = strings.ReplaceAll(lookupValue, "''", "'")
+		}
+		filterValue := fmt.Sprintf("%s eq '%s'", lookupField, strings.ReplaceAll(lookupValue, "'", "''"))
 		requestConfig.QueryParameters.Filter = &filterValue
 
 		// Use standard fields for user validation, appending any extra fields requested.
