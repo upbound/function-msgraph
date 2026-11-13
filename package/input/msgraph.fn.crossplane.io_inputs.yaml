@@ -130,9 +130,19 @@ spec:
           target:
             description: Target where to store the Query Result
             type: string
+          userLookupField:
+            description: |-
+              UserLookupField selects the Microsoft Graph property used by UserValidation.
+              Defaults to userPrincipalName when omitted. Set to mail to look up users
+              whose mail differs from their UPN, such as B2B guests. Mail lookups fail
+              when more than one user matches. This field does not affect other query types.
+            enum:
+            - userPrincipalName
+            - mail
+            type: string
           users:
-            description: Users is a list of userPrincipalName (email IDs) for user
-              validation
+            description: Users is a list of user identifiers for user validation,
+              matched against UserLookupField.
             items:
               type: string
             type: array

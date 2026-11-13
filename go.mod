@@ -7,6 +7,7 @@ require (
 	github.com/alecthomas/kong v1.15.0
 	github.com/crossplane/function-sdk-go v0.7.1
 	github.com/google/go-cmp v0.7.0
+	github.com/microsoft/kiota-abstractions-go v1.9.3
 	github.com/microsoft/kiota-authentication-azure-go v1.3.1
 	github.com/microsoftgraph/msgraph-sdk-go v1.96.0
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
@@ -58,7 +59,6 @@ require (
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
-	github.com/microsoft/kiota-abstractions-go v1.9.3 // indirect
 	github.com/microsoft/kiota-http-go v1.5.4 // indirect
 	github.com/microsoft/kiota-serialization-form-go v1.1.2 // indirect
 	github.com/microsoft/kiota-serialization-json-go v1.1.2 // indirect
