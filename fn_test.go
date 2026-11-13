@@ -4212,6 +4212,85 @@ func TestIdentityType(t *testing.T) {
 				},
 			},
 		},
+		"AzureWorkloadIdentityCredentialsWithoutSecret": {
+			reason: "The Function should not require the azure-creds Secret for Workload Identity, which the pod environment can provide entirely",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "GroupObjectIDs",
+						"groupsRef": "status.groups",
+						"target": "status.groupObjectIDs",
+						"identity": {
+							"type": "AzureWorkloadIdentityCredentials"
+						}
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  `failed to initialize workload identity provider: failed to obtain workloadidentity credentials`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+				},
+			},
+		},
+		"AzureServicePrincipalCredentialsWithoutSecret": {
+			reason: "The Function should still require the azure-creds Secret for service principal credentials",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "GroupObjectIDs",
+						"groupsRef": "status.groups",
+						"target": "status.groupObjectIDs"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  `failed to get azure-creds credentials`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+				},
+			},
+		},
 		"AzureWorkloadIdentityCredentials": {
 			reason: "The Function should use Workload Identity credentials if identity.type is AzureWorkloadIdentityCredentials",
 			args: args{

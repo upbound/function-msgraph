@@ -57,7 +57,15 @@ stringData:
 AKS cluster needs to have workload identity enabled.
 The managed identity needs to have the Federated Identity Credential created: https://azure.github.io/azure-workload-identity/docs/topics/federated-identity-credential.html.
 
-##### Credentials secret:
+##### Credentials secret (optional):
+The workload identity webhook injects `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
+`AZURE_FEDERATED_TOKEN_FILE` and the projected token volume into every pod
+that carries the `azure.workload.identity/use: "true"` label and runs with an
+annotated service account, and the function reads those variables when the
+corresponding key is absent. A credentials Secret is therefore only needed to
+override them, for example to use a different client id than the one on the
+service account:
+
 ```yaml
 apiVersion: v1
 kind: Secret
@@ -68,11 +76,13 @@ type: Opaque
 stringData:
   credentials: |
     {
-      "clientId": "your-client-id", # optional
-      "tenantId": "your-tenant-id", # optional
-      "federatedTokenFile": "/var/run/secrets/azure/tokens/azure-identity-token"
+      "clientId": "your-client-id", # optional, defaults to AZURE_CLIENT_ID
+      "tenantId": "your-tenant-id", # optional, defaults to AZURE_TENANT_ID
+      "federatedTokenFile": "/var/run/secrets/azure/tokens/azure-identity-token" # optional, defaults to AZURE_FEDERATED_TOKEN_FILE
     }
 ```
+
+Without a Secret, leave `credentials` out of the pipeline step.
 
 ##### Function
 ```yaml
@@ -89,39 +99,27 @@ spec:
 ```
 
 ##### DeploymentRuntimeConfig
+The label on the pod template and the annotation on the service account are
+all the webhook needs; it adds the environment variables and the token volume
+itself.
+
 ```yaml
 apiVersion: pkg.crossplane.io/v1beta1
 kind: DeploymentRuntimeConfig
 metadata:
   name: upbound-function-msgraph
-spec: 
+spec:
   deploymentTemplate:
     spec:
-      selector:
-        matchLabels:
-          azure.workload.identity/use: "true"
-          pkg.crossplane.io/function: "upbound-function-msgraph"
+      selector: {}
       template:
         metadata:
           labels:
             azure.workload.identity/use: "true"
-            pkg.crossplane.io/function: "upbound-function-msgraph"
         spec:
+          serviceAccountName: "upbound-function-msgraph"
           containers:
           - name: package-runtime
-            volumeMounts:
-            - mountPath: /var/run/secrets/azure/tokens
-              name: azure-identity-token
-              readOnly: true
-          serviceAccountName: "upbound-function-msgraph"
-          volumes:
-          - name: azure-identity-token
-            projected:
-              sources:
-              - serviceAccountToken:
-                  audience: api://AzureADTokenExchange
-                  expirationSeconds: 3600
-                  path: azure-identity-token
   serviceAccountTemplate:
     metadata:
       annotations:
