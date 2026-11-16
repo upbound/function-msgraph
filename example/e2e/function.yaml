@@ -22,6 +22,6 @@ kind: Function
 metadata:
   name: function-msgraph
 spec:
-  package: xpkg.upbound.io/upbound/function-msgraph:v0.8.0-rc2
+  package: xpkg.upbound.io/upbound/function-msgraph:v0.8.0
   runtimeConfigRef:
     name: msgraph-debug
