@@ -5308,7 +5308,7 @@ func TestSkipQueryWhenRefMissing(t *testing.T) {
 				Observed:    xrState(newXR),
 				Credentials: credentials,
 			},
-			want:           failed("no names provided"),
+			want:           failed("no group name provided"),
 			wantGraphCalls: 1,
 		},
 		"GroupRefResolvesWithFlag": {
@@ -5438,15 +5438,64 @@ func TestSkipQueryWhenRefMissing(t *testing.T) {
 			want: failed("unsupported groupsRef format: groupNames"),
 		},
 		"UsersRefEmptyIsNotSkipped": {
-			reason: "With the flag set, an empty usersRef is ignored as today and the query fails without users",
+			reason: "With the flag set, an empty usersRef is ignored as today and, without users, an empty list is written to the target",
 			req: &fnv1.RunFunctionRequest{
 				Meta:        &fnv1.RequestMeta{Tag: testRequestTag},
 				Input:       input(`"queryType": "UserValidation", "usersRef": "", "target": "status.validatedUsers", "skipQueryWhenRefMissing": true`),
 				Observed:    xrState(newXR),
 				Credentials: credentials,
 			},
-			want:           failed("no names provided"),
+			want: &fnv1.RunFunctionResponse{
+				Meta:       meta,
+				Conditions: []*fnv1.Condition{successCond},
+				Results: []*fnv1.Result{{
+					Severity: fnv1.Severity_SEVERITY_NORMAL,
+					Message:  msgUserValidationQueryType,
+					Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+				}},
+				Desired: xrState(`{
+					"apiVersion": "example.org/v1", "kind": "XR", "metadata": {"name": "cool-xr"}, "spec": {"count": 2},
+					"status": {"existing": "keep-me", "validatedUsers": []}
+				}`),
+			},
 			wantGraphCalls: 1,
+		},
+		"SkipCarriesObservedTargetIntoDesiredStatus": {
+			reason: "When an earlier step wrote a desired status without the target, a skip should carry the observed target and its timestamp so they are not pruned",
+			req: &fnv1.RunFunctionRequest{
+				Meta:  &fnv1.RequestMeta{Tag: testRequestTag},
+				Input: input(`"queryType": "GroupMembership", "groupRef": "status.groups.owners.name", "target": "status.groupMembers", "queryInterval": "10m", "skipQueryWhenRefMissing": true`),
+				Observed: xrState(`{
+					"apiVersion": "example.org/v1", "kind": "XR", "metadata": {"name": "cool-xr"}, "spec": {"count": 2},
+					"status": {
+						"groupMembers": ["Owners"],
+						"lastQueryTimestamps": {"groupMembers": "2020-01-01T00:00:00Z", "other": "2020-01-01T00:00:00Z"}
+					}
+				}`),
+				Desired: xrState(`{
+					"apiVersion": "example.org/v1", "kind": "XR", "metadata": {"name": "cool-xr"},
+					"status": {"earlier": "step"}
+				}`),
+				Credentials: credentials,
+			},
+			want: &fnv1.RunFunctionResponse{
+				Meta: meta,
+				Conditions: []*fnv1.Condition{
+					skipCond("Query skipped: groupRef status.groups.owners.name could not be resolved yet"),
+					successCond,
+				},
+				Results: []*fnv1.Result{
+					warning("cannot resolve groupRef: status.groups.owners.name not found; skipping query (skipQueryWhenRefMissing)"),
+				},
+				Desired: xrState(`{
+					"apiVersion": "example.org/v1", "kind": "XR", "metadata": {"name": "cool-xr"}, "spec": {"count": 2},
+					"status": {
+						"earlier": "step",
+						"groupMembers": ["Owners"],
+						"lastQueryTimestamps": {"groupMembers": "2020-01-01T00:00:00Z"}
+					}
+				}`),
+			},
 		},
 		"ArrayRefsResolveWithFlag": {
 			reason: "With the flag set, a resolvable usersRef should run the query and write the result as usual",
@@ -5521,12 +5570,13 @@ func TestSkipQueryWhenRefMissing(t *testing.T) {
 				// Echoes the resolved names so tests can see what the ref resolved to.
 				GraphQueryFunc: func(_ context.Context, _ map[string]string, in *v1beta1.Input) (interface{}, error) {
 					graphCalls++
+					// Mirrors the real client: GroupMembership needs a group, list queries accept none.
+					if in.GroupRef != nil && ptr.Deref(in.Group, "") == "" {
+						return nil, errors.New("no group name provided")
+					}
 					names := slices.Concat(in.Groups, in.Users, in.ServicePrincipals)
 					if in.Group != nil && *in.Group != "" {
 						names = append(names, in.Group)
-					}
-					if len(names) == 0 {
-						return nil, errors.New("no names provided")
 					}
 					results := make([]interface{}, 0, len(names))
 					for _, n := range names {

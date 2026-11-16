@@ -529,15 +529,21 @@ skipQueryWhenRefMissing: true
 ```
 
 While the path is missing, the function does not call Microsoft Graph, leaves the
-target untouched, passes the desired XR and context through unchanged, emits a
-Warning result and sets a `FunctionSkip` condition with reason `RefNotResolved`.
-The rest of the pipeline runs, and the query runs on the first reconcile where the
-reference resolves. In Operation mode, a skipped run does not update the drift
-annotations.
+target and its `lastQueryTimestamps` entry untouched, passes the desired XR and
+context through unchanged, emits a Warning result and sets a `FunctionSkip`
+condition with reason `RefNotResolved`. The rest of the pipeline runs, and the
+query runs on the first reconcile where the reference resolves. In Operation
+mode, a skipped run does not update the drift annotations.
+
+> Note: a `status.` reference is read from the desired XR status when an earlier
+> pipeline step has written any status, and from the observed XR otherwise. If an
+> earlier step writes status, the referenced field must be in that desired status
+> (for example by carrying it over from the observed XR); a field present only on
+> the observed XR is not read, so the query keeps being skipped.
 
 Only a missing path is skipped. These remain fatal even with the flag set:
 
-- an empty or unsupported reference (for example one that does not start with
+- an unsupported reference (for example one that does not start with
   `spec.`, `status.` or `context.`)
 - a path that exists but holds the wrong type (not a map, not a string array, or
   a non-string value for `groupRef`)

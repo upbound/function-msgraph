@@ -1584,7 +1584,7 @@ func (f *Function) processGroupRef(req *fnv1.RunFunctionRequest, in *v1beta1.Inp
 
 	groupName, err := f.resolveGroupRef(req, in.GroupRef, inOperation)
 	if err != nil {
-		f.failOrSkipOnRef(in, rsp, "groupRef", *in.GroupRef, err)
+		f.failOrSkipOnRef(req, in, rsp, "groupRef", *in.GroupRef, err, inOperation)
 		return false
 	}
 	in.Group = &groupName
@@ -1600,7 +1600,7 @@ func (f *Function) processGroupsRef(req *fnv1.RunFunctionRequest, in *v1beta1.In
 
 	groupNames, err := f.resolveGroupsRef(req, in.GroupsRef, inOperation)
 	if err != nil {
-		f.failOrSkipOnRef(in, rsp, "groupsRef", *in.GroupsRef, err)
+		f.failOrSkipOnRef(req, in, rsp, "groupsRef", *in.GroupsRef, err, inOperation)
 		return false
 	}
 	in.Groups = groupNames
@@ -1616,7 +1616,7 @@ func (f *Function) processUsersRef(req *fnv1.RunFunctionRequest, in *v1beta1.Inp
 
 	userNames, err := f.resolveUsersRef(req, in.UsersRef, inOperation)
 	if err != nil {
-		f.failOrSkipOnRef(in, rsp, "usersRef", *in.UsersRef, err)
+		f.failOrSkipOnRef(req, in, rsp, "usersRef", *in.UsersRef, err, inOperation)
 		return false
 	}
 	in.Users = userNames
@@ -1632,7 +1632,7 @@ func (f *Function) processServicePrincipalsRef(req *fnv1.RunFunctionRequest, in 
 
 	spNames, err := f.resolveServicePrincipalsRef(req, in.ServicePrincipalsRef, inOperation)
 	if err != nil {
-		f.failOrSkipOnRef(in, rsp, "servicePrincipalsRef", *in.ServicePrincipalsRef, err)
+		f.failOrSkipOnRef(req, in, rsp, "servicePrincipalsRef", *in.ServicePrincipalsRef, err, inOperation)
 		return false
 	}
 	in.ServicePrincipals = spNames
@@ -1643,10 +1643,17 @@ func (f *Function) processServicePrincipalsRef(req *fnv1.RunFunctionRequest, in 
 // failOrSkipOnRef reports a reference resolution error. With
 // skipQueryWhenRefMissing set, a missing reference path skips the query with a
 // warning instead of failing; every other error remains fatal.
-func (f *Function) failOrSkipOnRef(in *v1beta1.Input, rsp *fnv1.RunFunctionResponse, refType, refKey string, err error) {
+func (f *Function) failOrSkipOnRef(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse, refType, refKey string, err error, inOperation bool) {
 	if !ptr.Deref(in.SkipQueryWhenRefMissing, false) || !errors.Is(err, errRefNotFound) {
 		response.Fatal(rsp, err)
 		return
+	}
+
+	if !inOperation && strings.HasPrefix(in.Target, "status.") {
+		if err := f.carryObservedTarget(req, rsp, in); err != nil {
+			response.Fatal(rsp, err)
+			return
+		}
 	}
 
 	f.log.Info("Reference not resolvable yet, skipping query", refType, refKey)
@@ -1657,6 +1664,80 @@ func (f *Function) failOrSkipOnRef(in *v1beta1.Input, rsp *fnv1.RunFunctionRespo
 		TargetCompositeAndClaim()
 	response.ConditionTrue(rsp, "FunctionSuccess", "Success").
 		TargetCompositeAndClaim()
+}
+
+// carryObservedTarget copies the observed status target and its
+// LastQueryTimestampsField entry into the desired XR status when an earlier
+// pipeline step wrote a status without them, so a skipped query does not prune them.
+func (f *Function) carryObservedTarget(req *fnv1.RunFunctionRequest, rsp *fnv1.RunFunctionResponse, in *v1beta1.Input) error {
+	xrStatus, dxr, err := f.getDXRAndStatus(req, false)
+	if err != nil {
+		return err
+	}
+	oxr, err := request.GetObservedCompositeResource(req)
+	if err != nil {
+		return errors.Wrap(err, "cannot get observed composite resource")
+	}
+	observed := make(map[string]interface{})
+	if err := oxr.Resource.GetValueInto("status", &observed); err != nil {
+		return nil //nolint:nilerr // no observed status to carry
+	}
+
+	statusField := strings.TrimPrefix(in.Target, "status.")
+	valueCarried, err := carryObservedValue(observed, xrStatus, statusField)
+	if err != nil {
+		return err
+	}
+	timestampCarried := carryObservedTimestamp(observed, xrStatus, statusField)
+
+	if !valueCarried && !timestampCarried {
+		return nil
+	}
+	if err := dxr.Resource.SetValue("status", xrStatus); err != nil {
+		return errors.Wrap(err, "cannot write status back into composite resource")
+	}
+	if err := response.SetDesiredCompositeResource(rsp, dxr); err != nil {
+		return errors.Wrapf(err, "cannot set desired composite resource in %T", rsp)
+	}
+	return nil
+}
+
+// carryObservedValue copies field from observed into desired when only observed has it.
+func carryObservedValue(observed, desired map[string]interface{}, field string) (bool, error) {
+	value, err := lookupNestedValue(observed, field)
+	if err != nil {
+		return false, nil //nolint:nilerr // nothing observed to carry
+	}
+	if _, err := lookupNestedValue(desired, field); !errors.Is(err, errRefNotFound) {
+		return false, nil
+	}
+	if err := SetNestedKey(desired, field, value); err != nil {
+		return false, errors.Wrapf(err, "cannot carry observed status field %s", field)
+	}
+	return true, nil
+}
+
+// carryObservedTimestamp copies the LastQueryTimestampsField entry for field
+// from observed into desired when only observed has it.
+func carryObservedTimestamp(observed, desired map[string]interface{}, field string) bool {
+	observedTS, ok := observed[LastQueryTimestampsField].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	ts, ok := observedTS[field]
+	if !ok {
+		return false
+	}
+	desiredTS, ok := desired[LastQueryTimestampsField].(map[string]interface{})
+	if !ok {
+		desiredTS = make(map[string]interface{})
+	}
+	if _, exists := desiredTS[field]; exists {
+		return false
+	}
+	desiredTS[field] = ts
+	desired[LastQueryTimestampsField] = desiredTS
+	return true
 }
 
 // executeAndProcessQuery executes the query and processes the results
