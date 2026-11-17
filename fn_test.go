@@ -5497,6 +5497,53 @@ func TestSkipQueryWhenRefMissing(t *testing.T) {
 				}`),
 			},
 		},
+		"SkipCarriesObservedValueWithoutQueryInterval": {
+			reason: "Without queryInterval, a skip should still carry the observed target alone into the desired status",
+			req: &fnv1.RunFunctionRequest{
+				Meta:  &fnv1.RequestMeta{Tag: testRequestTag},
+				Input: input(`"queryType": "GroupMembership", "groupRef": "spec.groupName", "target": "status.groupMembers", "skipQueryWhenRefMissing": true`),
+				Observed: xrState(`{
+					"apiVersion": "example.org/v1", "kind": "XR", "metadata": {"name": "cool-xr"}, "spec": {"count": 2},
+					"status": {"groupMembers": ["Owners"]}
+				}`),
+				Desired: xrState(`{
+					"apiVersion": "example.org/v1", "kind": "XR", "metadata": {"name": "cool-xr"},
+					"status": {"earlier": "step"}
+				}`),
+				Credentials: credentials,
+			},
+			want: func() *fnv1.RunFunctionResponse {
+				rsp := skipped("groupRef", "spec.groupName")
+				rsp.Desired = xrState(`{
+					"apiVersion": "example.org/v1", "kind": "XR", "metadata": {"name": "cool-xr"}, "spec": {"count": 2},
+					"status": {"earlier": "step", "groupMembers": ["Owners"]}
+				}`)
+				return rsp
+			}(),
+		},
+		"SkipWithoutObservedStatusKeepsDesiredStatus": {
+			reason: "When the observed XR has no status yet, a skip should carry nothing and keep the earlier step's status",
+			req: &fnv1.RunFunctionRequest{
+				Meta:  &fnv1.RequestMeta{Tag: testRequestTag},
+				Input: input(`"queryType": "GroupMembership", "groupRef": "spec.groupName", "target": "status.groupMembers", "skipQueryWhenRefMissing": true`),
+				Observed: xrState(`{
+					"apiVersion": "example.org/v1", "kind": "XR", "metadata": {"name": "cool-xr"}, "spec": {"count": 2}
+				}`),
+				Desired: xrState(`{
+					"apiVersion": "example.org/v1", "kind": "XR", "metadata": {"name": "cool-xr"},
+					"status": {"earlier": "step"}
+				}`),
+				Credentials: credentials,
+			},
+			want: func() *fnv1.RunFunctionResponse {
+				rsp := skipped("groupRef", "spec.groupName")
+				rsp.Desired = xrState(`{
+					"apiVersion": "example.org/v1", "kind": "XR", "metadata": {"name": "cool-xr"}, "spec": {"count": 2},
+					"status": {"earlier": "step"}
+				}`)
+				return rsp
+			}(),
+		},
 		"ArrayRefsResolveWithFlag": {
 			reason: "With the flag set, a resolvable usersRef should run the query and write the result as usual",
 			req: &fnv1.RunFunctionRequest{
