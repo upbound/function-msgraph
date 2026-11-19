@@ -1,0 +1,28 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: group-membership-example-skip-ref-missing
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1
+    kind: XR
+  mode: Pipeline
+  pipeline:
+    - step: get-owner-members
+      functionRef:
+        name: function-msgraph
+      input:
+        apiVersion: msgraph.fn.crossplane.io/v1alpha1
+        kind: Input
+        queryType: GroupMembership
+        # Written to the XR status by a later step once the group exists.
+        groupRef: status.ownersGroup.name
+        target: "status.ownerMembers"
+        # Skip (with a warning) instead of failing while the reference is missing.
+        skipQueryWhenRefMissing: true
+      credentials:
+        - name: azure-creds
+          source: Secret
+          secretRef:
+            namespace: crossplane-system
+            name: azure-account-creds

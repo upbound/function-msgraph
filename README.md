@@ -163,6 +163,43 @@ spec:
           name: azure-account-creds
 ```
 
+#### Look up users by mail
+
+A B2B guest's `mail` can differ from their tenant-specific `userPrincipalName`.
+Set `userLookupField: mail` to resolve the mail address directly without deriving
+or maintaining a guest UPN:
+
+```yaml
+queryType: UserValidation
+userLookupField: mail
+users:
+  - developer@example.com
+target: status.validatedUsers
+```
+
+This also works with `usersRef`. The default remains `userPrincipalName`, and
+the result retains both the actual `mail` and `userPrincipalName` properties.
+Only `userPrincipalName` and `mail` are accepted lookup fields. Values are
+escaped as OData string literals rather than interpolated as filter expressions.
+
+For backward compatibility, UPN lookups (default or explicit) treat doubled
+apostrophes in the input as one apostrophe before escaping: both
+`o'brien@example.com` and `o''brien@example.com` search for `o'brien@example.com`.
+Mail inputs remain literal: two apostrophes are preserved as two apostrophes.
+
+Mail addresses are not unique directory identifiers: if a mail query returns
+multiple users, the function fails rather than returning multiple principals
+for one requested owner. If no user matches, the result remains empty, as for
+existing UPN lookups. `failOnEmpty` checks the input list, not missing matches;
+consuming compositions must check for the expected number of resolved users
+before applying grants.
+
+Existing `activeAccount`, `queryInterval` and `skipQueryWhenTargetHasData`
+behavior is unchanged. Cached results are not automatically invalidated by a
+change to the lookup field; when changing it on an existing XR, force a fresh
+query (for example by disabling the skip flag for one reconcile and waiting
+for any configured query interval).
+
 #### Only Active (Enabled) Accounts
 
 By default a user is validated on existence alone, so a disabled (for example
@@ -338,7 +375,8 @@ spec:
 | Field | Type | Description |
 |-------|------|-------------|
 | `queryType` | string | Required. Type of query to perform. Valid values: `UserValidation`, `GroupMembership`, `GroupObjectIDs`, `ServicePrincipalDetails` |
-| `users` | []string | List of user principal names (email IDs) for user validation |
+| `users` | []string | List of user identifiers for validation, matched against `userLookupField` |
+| `userLookupField` | string | `UserValidation` only. Property to match: `userPrincipalName` (default) or `mail`. Mail queries fail if multiple users match. |
 | `usersRef` | string | Reference to resolve a list of user names from `spec`, `status` or `context` (e.g., `spec.userAccess.emails`) |
 | `group` | string | Single group name for group membership queries |
 | `groupRef` | string | Reference to resolve a single group name from `spec`, `status` or `context` (e.g., `spec.groupConfig.name`) |
@@ -348,6 +386,7 @@ spec:
 | `servicePrincipalsRef` | string | Reference to resolve a list of service principal names from `spec`, `status` or `context` (e.g., `spec.servicePrincipalConfig.names`) |
 | `target` | string | Required. Where to store the query results. Can be `status.<field>` or `context.<field>` |
 | `skipQueryWhenTargetHasData` | bool | Optional. When true, will skip the query if the target already has data |
+| `skipQueryWhenRefMissing` | bool | Optional. When true, a `groupRef`, `groupsRef`, `usersRef` or `servicePrincipalsRef` whose path does not exist yet skips the query with a warning instead of failing the pipeline. The target is left untouched. Default is false. See [Skipping when a reference is not resolvable yet](#skipping-when-a-reference-is-not-resolvable-yet). |
 | `queryInterval` | string | Optional. Minimum interval between queries as a Go duration string (e.g. `10m`, `1h`, `90s`). Skips querying Microsoft Graph until the interval has elapsed since the last successful query, independent of reconcile frequency. Only effective in Composition mode with a `status.` target. |
 | `failOnEmpty` | bool | Optional. When true, the function will fail if the `users`, `groups`, or `servicePrincipals` lists are empty, or if their respective reference fields are empty lists. |
 | `activeAccount` | bool | Optional. `UserValidation` only. When true, only users whose Entra ID `accountEnabled` attribute is true are stored at the target; disabled users, and users whose account state Graph does not report, are omitted. |
@@ -470,6 +509,45 @@ queryType: ServicePrincipalDetails
 servicePrincipalsRef: "spec.servicePrincipalConfig.names"  # Get service principal names from XR spec
 target: "status.servicePrincipals"
 ```
+
+### Skipping when a reference is not resolvable yet
+
+By default, a reference whose path does not exist is a fatal error, which aborts
+the whole Composition pipeline. That can deadlock an XR when the referenced field
+is written later in the pipeline or on a later reconcile, for example when a
+later step creates the Entra ID group and records its name in the XR status.
+
+Set `skipQueryWhenRefMissing: true` to skip the query instead:
+
+```yaml
+apiVersion: msgraph.fn.crossplane.io/v1alpha1
+kind: Input
+queryType: GroupMembership
+groupRef: "status.groups.owners.name"  # Written by a later step once the group exists
+target: "status.ownerMembers"
+skipQueryWhenRefMissing: true
+```
+
+While the path is missing, the function does not call Microsoft Graph, leaves the
+target and its `lastQueryTimestamps` entry untouched, passes the desired XR and
+context through unchanged, emits a Warning result and sets a `FunctionSkip`
+condition with reason `RefNotResolved`. The rest of the pipeline runs, and the
+query runs on the first reconcile where the reference resolves. In Operation
+mode, a skipped run does not update the drift annotations.
+
+> Note: a `status.` reference is read from the desired XR status when an earlier
+> pipeline step has written any status, and from the observed XR otherwise. If an
+> earlier step writes status, the referenced field must be in that desired status
+> (for example by carrying it over from the observed XR); a field present only on
+> the observed XR is not read, so the query keeps being skipped.
+
+Only a missing path is skipped. These remain fatal even with the flag set:
+
+- an unsupported reference (for example one that does not start with
+  `spec.`, `status.` or `context.`)
+- a path that exists but holds the wrong type (not a map, not a string array, or
+  a non-string value for `groupRef`)
+- any Microsoft Graph error, including a group that does not exist
 
 ## Using data from EnvironmentConfig
 

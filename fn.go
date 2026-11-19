@@ -83,6 +83,10 @@ const (
 	unknownType          = "unknown"
 )
 
+// errRefNotFound marks a reference whose path does not exist. Its text keeps
+// the existing "cannot resolve ...: <ref> not found" messages unchanged.
+var errRefNotFound = errors.New("not found")
+
 // graphFieldNameRE matches the shape of a Microsoft Graph property name,
 // including OData extension attributes (extension_<appId>_<name>).
 var graphFieldNameRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
@@ -728,18 +732,40 @@ func (g *GraphQuery) graphQuery(ctx context.Context, azureCreds map[string]strin
 	}
 }
 
-// validateUsers validates if the provided user principal names (emails) exist
+// resolveUserLookupField limits filters to supported Graph properties and keeps
+// the existing UPN lookup as the default for inputs that omit the new field.
+func resolveUserLookupField(field string) (string, error) {
+	switch field {
+	case "", fieldUserPrincipalName:
+		return fieldUserPrincipalName, nil
+	case fieldMail:
+		return fieldMail, nil
+	default:
+		return "", errors.Errorf("unsupported userLookupField %q: expected userPrincipalName or mail", field)
+	}
+}
+
+func ambiguousMailLookup(field string, result models.UserCollectionResponseable) bool {
+	return field == fieldMail && (len(result.GetValue()) > 1 || ptr.Deref(result.GetOdataNextLink(), "") != "")
+}
+
+// validateUsers validates whether the supplied user identifiers exist.
 func (g *GraphQuery) validateUsers(ctx context.Context, client *msgraphsdk.GraphServiceClient, in *v1beta1.Input) (interface{}, error) {
 	if in.FailOnEmpty != nil && *in.FailOnEmpty && len(in.Users) == 0 {
 		return nil, errors.New("no users provided for validation")
+	}
+
+	lookupField, err := resolveUserLookupField(in.UserLookupField)
+	if err != nil {
+		return nil, err
 	}
 
 	results := make([]interface{}, 0)
 	requireActiveAccount := ptr.Deref(in.ActiveAccount, false)
 	validExtra := g.filterSelectFields(in.AdditionalFields, (*models.User)(nil))
 
-	for _, userPrincipalName := range in.Users {
-		if userPrincipalName == nil {
+	for _, identifier := range in.Users {
+		if identifier == nil {
 			continue
 		}
 
@@ -748,8 +774,12 @@ func (g *GraphQuery) validateUsers(ctx context.Context, client *msgraphsdk.Graph
 			QueryParameters: &users.UsersRequestBuilderGetQueryParameters{},
 		}
 
-		// Build filter expression
-		filterValue := fmt.Sprintf("userPrincipalName eq '%s'", *userPrincipalName)
+		// Preserve support for pre-escaped UPN inputs accepted by the released filter.
+		lookupValue := *identifier
+		if lookupField == fieldUserPrincipalName {
+			lookupValue = strings.ReplaceAll(lookupValue, "''", "'")
+		}
+		filterValue := fmt.Sprintf("%s eq '%s'", lookupField, strings.ReplaceAll(lookupValue, "'", "''"))
 		requestConfig.QueryParameters.Filter = &filterValue
 
 		// Use standard fields for user validation, appending any extra fields requested.
@@ -762,7 +792,13 @@ func (g *GraphQuery) validateUsers(ctx context.Context, client *msgraphsdk.Graph
 		// Execute the query
 		result, err := client.Users().Get(ctx, requestConfig)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to validate user %s", *userPrincipalName)
+			return nil, errors.Wrapf(err, "failed to validate user %s", *identifier)
+		}
+
+		// Unlike UPNs, mail addresses are not unique directory identifiers. Never
+		// turn an ambiguous mail lookup into a grant to multiple principals.
+		if ambiguousMailLookup(lookupField, result) {
+			return nil, errors.Errorf("mail lookup for %q matched multiple users", *identifier)
 		}
 
 		// Process results
@@ -1168,31 +1204,48 @@ func ParseNestedKey(key string) ([]string, error) {
 
 // GetNestedKey retrieves a nested string value from a map using dot notation keys.
 func GetNestedKey(context map[string]interface{}, key string) (string, bool) {
-	parts, err := ParseNestedKey(key)
+	value, err := lookupNestedValue(context, key)
 	if err != nil {
 		return "", false
 	}
+	result, ok := value.(string)
+	return result, ok
+}
 
-	currentValue := interface{}(context)
+// lookupNestedValue returns the value at a nested key. It returns
+// errRefNotFound only when a key along the path is absent.
+func lookupNestedValue(root map[string]interface{}, key string) (interface{}, error) {
+	parts, err := ParseNestedKey(key)
+	if err != nil {
+		return nil, err
+	}
+
+	currentValue := interface{}(root)
 	for _, k := range parts {
-		// Check if the current value is a map
-		if nestedMap, ok := currentValue.(map[string]interface{}); ok {
-			// Get the next value in the nested map
-			if nextValue, exists := nestedMap[k]; exists {
-				currentValue = nextValue
-			} else {
-				return "", false
-			}
-		} else {
-			return "", false
+		nestedMap, ok := currentValue.(map[string]interface{})
+		if !ok {
+			return nil, errors.Errorf("%s is not a map", k)
 		}
+		nextValue, exists := nestedMap[k]
+		if !exists {
+			return nil, errRefNotFound
+		}
+		currentValue = nextValue
 	}
+	return currentValue, nil
+}
 
-	// Convert the final value to a string
-	if result, ok := currentValue.(string); ok {
-		return result, true
+// resolveGroupRefValue resolves a groupRef string value from a map.
+func resolveGroupRefValue(data map[string]interface{}, field, refKey string) (string, error) {
+	value, err := lookupNestedValue(data, field)
+	if errors.Is(err, errRefNotFound) {
+		return "", errors.Errorf("cannot resolve groupRef: %s %w", refKey, errRefNotFound)
 	}
-	return "", false
+	result, ok := value.(string)
+	if err != nil || !ok {
+		return "", errors.Errorf("cannot resolve groupRef: %s not found", refKey)
+	}
+	return result, nil
 }
 
 // SetNestedKey sets a value to a nested key from a map using dot notation keys.
@@ -1531,7 +1584,7 @@ func (f *Function) processGroupRef(req *fnv1.RunFunctionRequest, in *v1beta1.Inp
 
 	groupName, err := f.resolveGroupRef(req, in.GroupRef, inOperation)
 	if err != nil {
-		response.Fatal(rsp, err)
+		f.failOrSkipOnRef(req, in, rsp, "groupRef", *in.GroupRef, err, inOperation)
 		return false
 	}
 	in.Group = &groupName
@@ -1547,7 +1600,7 @@ func (f *Function) processGroupsRef(req *fnv1.RunFunctionRequest, in *v1beta1.In
 
 	groupNames, err := f.resolveGroupsRef(req, in.GroupsRef, inOperation)
 	if err != nil {
-		response.Fatal(rsp, err)
+		f.failOrSkipOnRef(req, in, rsp, "groupsRef", *in.GroupsRef, err, inOperation)
 		return false
 	}
 	in.Groups = groupNames
@@ -1563,7 +1616,7 @@ func (f *Function) processUsersRef(req *fnv1.RunFunctionRequest, in *v1beta1.Inp
 
 	userNames, err := f.resolveUsersRef(req, in.UsersRef, inOperation)
 	if err != nil {
-		response.Fatal(rsp, err)
+		f.failOrSkipOnRef(req, in, rsp, "usersRef", *in.UsersRef, err, inOperation)
 		return false
 	}
 	in.Users = userNames
@@ -1579,11 +1632,111 @@ func (f *Function) processServicePrincipalsRef(req *fnv1.RunFunctionRequest, in 
 
 	spNames, err := f.resolveServicePrincipalsRef(req, in.ServicePrincipalsRef, inOperation)
 	if err != nil {
-		response.Fatal(rsp, err)
+		f.failOrSkipOnRef(req, in, rsp, "servicePrincipalsRef", *in.ServicePrincipalsRef, err, inOperation)
 		return false
 	}
 	in.ServicePrincipals = spNames
 	f.log.Info("Resolved ServicePrincipalsRef to service principals", "spCount", len(spNames), "servicePrincipalsRef", *in.ServicePrincipalsRef)
+	return true
+}
+
+// failOrSkipOnRef reports a reference resolution error. With
+// skipQueryWhenRefMissing set, a missing reference path skips the query with a
+// warning instead of failing; every other error remains fatal.
+func (f *Function) failOrSkipOnRef(req *fnv1.RunFunctionRequest, in *v1beta1.Input, rsp *fnv1.RunFunctionResponse, refType, refKey string, err error, inOperation bool) {
+	if !ptr.Deref(in.SkipQueryWhenRefMissing, false) || !errors.Is(err, errRefNotFound) {
+		response.Fatal(rsp, err)
+		return
+	}
+
+	if !inOperation && strings.HasPrefix(in.Target, "status.") {
+		if err := f.carryObservedTarget(req, rsp, in); err != nil {
+			response.Fatal(rsp, err)
+			return
+		}
+	}
+
+	f.log.Info("Reference not resolvable yet, skipping query", refType, refKey)
+	response.Warning(rsp, errors.Errorf("%s; skipping query (skipQueryWhenRefMissing)", err.Error())).
+		TargetCompositeAndClaim()
+	response.ConditionTrue(rsp, "FunctionSkip", "RefNotResolved").
+		WithMessage(fmt.Sprintf("Query skipped: %s %s could not be resolved yet", refType, refKey)).
+		TargetCompositeAndClaim()
+	response.ConditionTrue(rsp, "FunctionSuccess", "Success").
+		TargetCompositeAndClaim()
+}
+
+// carryObservedTarget copies the observed status target and its
+// LastQueryTimestampsField entry into the desired XR status when an earlier
+// pipeline step wrote a status without them, so a skipped query does not prune them.
+func (f *Function) carryObservedTarget(req *fnv1.RunFunctionRequest, rsp *fnv1.RunFunctionResponse, in *v1beta1.Input) error {
+	xrStatus, dxr, err := f.getDXRAndStatus(req, false)
+	if err != nil {
+		return err
+	}
+	oxr, err := request.GetObservedCompositeResource(req)
+	if err != nil {
+		return errors.Wrap(err, "cannot get observed composite resource")
+	}
+	observed := make(map[string]interface{})
+	if err := oxr.Resource.GetValueInto("status", &observed); err != nil {
+		return nil //nolint:nilerr // no observed status to carry
+	}
+
+	statusField := strings.TrimPrefix(in.Target, "status.")
+	valueCarried, err := carryObservedValue(observed, xrStatus, statusField)
+	if err != nil {
+		return err
+	}
+	timestampCarried := carryObservedTimestamp(observed, xrStatus, statusField)
+
+	if !valueCarried && !timestampCarried {
+		return nil
+	}
+	if err := dxr.Resource.SetValue("status", xrStatus); err != nil {
+		return errors.Wrap(err, "cannot write status back into composite resource")
+	}
+	if err := response.SetDesiredCompositeResource(rsp, dxr); err != nil {
+		return errors.Wrapf(err, "cannot set desired composite resource in %T", rsp)
+	}
+	return nil
+}
+
+// carryObservedValue copies field from observed into desired when only observed has it.
+func carryObservedValue(observed, desired map[string]interface{}, field string) (bool, error) {
+	value, err := lookupNestedValue(observed, field)
+	if err != nil {
+		return false, nil //nolint:nilerr // nothing observed to carry
+	}
+	if _, err := lookupNestedValue(desired, field); !errors.Is(err, errRefNotFound) {
+		return false, nil
+	}
+	if err := SetNestedKey(desired, field, value); err != nil {
+		return false, errors.Wrapf(err, "cannot carry observed status field %s", field)
+	}
+	return true, nil
+}
+
+// carryObservedTimestamp copies the LastQueryTimestampsField entry for field
+// from observed into desired when only observed has it.
+func carryObservedTimestamp(observed, desired map[string]interface{}, field string) bool {
+	observedTS, ok := observed[LastQueryTimestampsField].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	ts, ok := observedTS[field]
+	if !ok {
+		return false
+	}
+	desiredTS, ok := desired[LastQueryTimestampsField].(map[string]interface{})
+	if !ok {
+		desiredTS = make(map[string]interface{})
+	}
+	if _, exists := desiredTS[field]; exists {
+		return false
+	}
+	desiredTS[field] = ts
+	desired[LastQueryTimestampsField] = desiredTS
 	return true
 }
 
@@ -1818,22 +1971,14 @@ func (f *Function) resolveFromStatus(req *fnv1.RunFunctionRequest, refKey string
 	}
 
 	statusField := strings.TrimPrefix(refKey, "status.")
-	value, ok := GetNestedKey(xrStatus, statusField)
-	if !ok {
-		return "", errors.Errorf("cannot resolve groupRef: %s not found", refKey)
-	}
-	return value, nil
+	return resolveGroupRefValue(xrStatus, statusField, refKey)
 }
 
 // resolveFromContext resolves a reference from function context
 func (f *Function) resolveFromContext(req *fnv1.RunFunctionRequest, refKey string) (string, error) {
 	contextMap := req.GetContext().AsMap()
 	contextField := strings.TrimPrefix(refKey, "context.")
-	value, ok := GetNestedKey(contextMap, contextField)
-	if !ok {
-		return "", errors.Errorf("cannot resolve groupRef: %s not found", refKey)
-	}
-	return value, nil
+	return resolveGroupRefValue(contextMap, contextField, refKey)
 }
 
 // resolveFromSpec resolves a reference from XR spec
@@ -1852,11 +1997,7 @@ func (f *Function) resolveFromSpec(req *fnv1.RunFunctionRequest, refKey string, 
 	}
 
 	specField := strings.TrimPrefix(refKey, "spec.")
-	value, ok := GetNestedKey(xrSpec, specField)
-	if !ok {
-		return "", errors.Errorf("cannot resolve groupRef: %s not found", refKey)
-	}
-	return value, nil
+	return resolveGroupRefValue(xrSpec, specField, refKey)
 }
 
 // resolveStringArrayRef resolves a list of string values from a reference in spec, status or context
@@ -1875,45 +2016,38 @@ func (f *Function) resolveStringArrayRef(req *fnv1.RunFunctionRequest, ref *stri
 	// Use proper switch statement instead of if-else chain
 	switch {
 	case strings.HasPrefix(refKey, "status."):
-		result, err = f.resolveStringArrayFromStatus(req, refKey, inOperation)
+		result, err = f.resolveStringArrayFromStatus(req, refKey, refType, inOperation)
 	case strings.HasPrefix(refKey, "context."):
-		result, err = f.resolveStringArrayFromContext(req, refKey)
+		result, err = f.resolveStringArrayFromContext(req, refKey, refType)
 	case strings.HasPrefix(refKey, "spec."):
-		result, err = f.resolveStringArrayFromSpec(req, refKey, inOperation)
+		result, err = f.resolveStringArrayFromSpec(req, refKey, refType, inOperation)
 	default:
 		return nil, errors.Errorf("unsupported %s format: %s", refType, refKey)
-	}
-
-	// If we got an error and it contains "groupsRef" but we're looking for a different ref type,
-	// replace it with the correct ref type
-	if err != nil && refType != "groupsRef" && strings.Contains(err.Error(), "groupsRef") {
-		errMsg := err.Error()
-		return nil, errors.New(strings.ReplaceAll(errMsg, "groupsRef", refType))
 	}
 
 	return result, err
 }
 
 // resolveStringArrayFromStatus resolves a list of string values from XR status
-func (f *Function) resolveStringArrayFromStatus(req *fnv1.RunFunctionRequest, refKey string, inOperation bool) ([]*string, error) {
+func (f *Function) resolveStringArrayFromStatus(req *fnv1.RunFunctionRequest, refKey, refType string, inOperation bool) ([]*string, error) {
 	xrStatus, _, err := f.getOXRAndStatus(req, inOperation)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot get XR status")
 	}
 
 	statusField := strings.TrimPrefix(refKey, "status.")
-	return f.extractStringArrayFromMap(xrStatus, statusField, refKey)
+	return f.extractStringArrayFromMap(xrStatus, statusField, refKey, refType)
 }
 
 // resolveStringArrayFromContext resolves a list of string values from function context
-func (f *Function) resolveStringArrayFromContext(req *fnv1.RunFunctionRequest, refKey string) ([]*string, error) {
+func (f *Function) resolveStringArrayFromContext(req *fnv1.RunFunctionRequest, refKey, refType string) ([]*string, error) {
 	contextMap := req.GetContext().AsMap()
 	contextField := strings.TrimPrefix(refKey, "context.")
-	return f.extractStringArrayFromMap(contextMap, contextField, refKey)
+	return f.extractStringArrayFromMap(contextMap, contextField, refKey, refType)
 }
 
 // resolveStringArrayFromSpec resolves a list of string values from XR spec
-func (f *Function) resolveStringArrayFromSpec(req *fnv1.RunFunctionRequest, refKey string, inOperation bool) ([]*string, error) {
+func (f *Function) resolveStringArrayFromSpec(req *fnv1.RunFunctionRequest, refKey, refType string, inOperation bool) ([]*string, error) {
 	_, oxr, err := f.getOXRAndStatus(req, inOperation)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot get XR status and observed XR")
@@ -1927,7 +2061,7 @@ func (f *Function) resolveStringArrayFromSpec(req *fnv1.RunFunctionRequest, refK
 	}
 
 	specField := strings.TrimPrefix(refKey, "spec.")
-	return f.extractStringArrayFromMap(xrSpec, specField, refKey)
+	return f.extractStringArrayFromMap(xrSpec, specField, refKey, refType)
 }
 
 // resolveGroupsRef resolves a list of group names from a reference in status or context
@@ -1946,7 +2080,7 @@ func (f *Function) resolveServicePrincipalsRef(req *fnv1.RunFunctionRequest, ser
 }
 
 // extractStringArrayFromMap extracts a string array from a map using nested key
-func (f *Function) extractStringArrayFromMap(dataMap map[string]interface{}, field, refKey string) ([]*string, error) {
+func (f *Function) extractStringArrayFromMap(dataMap map[string]interface{}, field, refKey, refType string) ([]*string, error) {
 	parts, err := ParseNestedKey(field)
 	if err != nil {
 		return nil, errors.Wrap(err, "invalid field key")
@@ -1958,10 +2092,10 @@ func (f *Function) extractStringArrayFromMap(dataMap map[string]interface{}, fie
 			if nextValue, exists := nestedMap[k]; exists {
 				currentValue = nextValue
 			} else {
-				return nil, errors.Errorf("cannot resolve groupsRef: %s not found", refKey)
+				return nil, errors.Errorf("cannot resolve %s: %s %w", refType, refKey, errRefNotFound)
 			}
 		} else {
-			return nil, errors.Errorf("cannot resolve groupsRef: %s not a map", refKey)
+			return nil, errors.Errorf("cannot resolve %s: %s not a map", refType, refKey)
 		}
 	}
 
@@ -1977,5 +2111,5 @@ func (f *Function) extractStringArrayFromMap(dataMap map[string]interface{}, fie
 		return result, nil
 	}
 
-	return nil, errors.Errorf("cannot resolve groupsRef: %s not a string array", refKey)
+	return nil, errors.Errorf("cannot resolve %s: %s not a string array", refType, refKey)
 }
