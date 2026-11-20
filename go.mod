@@ -4,7 +4,7 @@ go 1.26.10
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.13.1
-	github.com/alecthomas/kong v1.15.0
+	github.com/alecthomas/kong v1.17.0
 	github.com/crossplane/function-sdk-go v0.7.1
 	github.com/google/go-cmp v0.7.0
 	github.com/microsoft/kiota-abstractions-go v1.9.3
