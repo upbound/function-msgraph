@@ -9,7 +9,7 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/microsoft/kiota-abstractions-go v1.12.2
 	github.com/microsoft/kiota-authentication-azure-go v1.3.1
-	github.com/microsoftgraph/msgraph-sdk-go v1.96.0
+	github.com/microsoftgraph/msgraph-sdk-go v1.107.0
 	google.golang.org/protobuf v1.36.12
 	k8s.io/apimachinery v0.37.2
 	k8s.io/utils v0.0.0-20261023123148-ca04ba58ecab
@@ -59,12 +59,12 @@ require (
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
-	github.com/microsoft/kiota-http-go v1.5.5 // indirect
-	github.com/microsoft/kiota-serialization-form-go v1.1.2 // indirect
+	github.com/microsoft/kiota-http-go v1.5.6 // indirect
+	github.com/microsoft/kiota-serialization-form-go v1.1.3 // indirect
 	github.com/microsoft/kiota-serialization-json-go v1.1.2 // indirect
 	github.com/microsoft/kiota-serialization-multipart-go v1.1.2 // indirect
 	github.com/microsoft/kiota-serialization-text-go v1.1.3 // indirect
-	github.com/microsoftgraph/msgraph-sdk-go-core v1.4.0 // indirect
+	github.com/microsoftgraph/msgraph-sdk-go-core v1.4.1 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
