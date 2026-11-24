@@ -1,8 +1,9 @@
 # One read-only Microsoft Graph query: the details of the e2e app's own service
-# principal (needs Application.Read.All, no user data). The function signs in
+# principal. A service principal can read its own details without any Graph
+# permission, so the app needs no admin consent. No user data. The function signs in
 # with Azure workload identity, exchanging the Upbound OIDC token for an Entra
-# token. Any sign-in or query error (for example a missing Graph permission) is
-# fatal, so the XR never goes Ready.
+# token. Any sign-in or query error is fatal, and an empty result fails the
+# XRD's minItems, so in both cases the XR never goes Ready.
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:

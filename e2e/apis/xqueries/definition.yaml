@@ -22,7 +22,10 @@ spec:
             type: object
             properties:
               servicePrincipals:
+                # At least one result, so "not found" can't pass: the status
+                # write is rejected and the XR never goes Ready.
                 type: array
+                minItems: 1
                 items:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true

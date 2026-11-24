@@ -23,8 +23,9 @@ The query reads the details of the e2e app's own service principal
 data and changes nothing. Any sign-in or query error (including a missing Graph
 permission) makes the function return a fatal result, so the XR never becomes
 `Ready` and the test fails. A service principal that isn't found gives an empty
-result, not an error; the test queries the app's own principal, which always
-exists.
+result, not an error, so the XRD requires at least one entry in
+`status.servicePrincipals`: an empty result is rejected and the XR never becomes
+`Ready` either. (Checked: querying a name that doesn't exist fails the test.)
 
 ## Credentials (no Azure secrets in CI)
 
@@ -43,8 +44,10 @@ of its own pod:
 
 App registration `solutions-e2e-function` (client ID
 `b7b332bc-677c-4bae-a3ba-0aa7e6b2f24a`), shared with the function-azresourcegraph
-e2e test. For this test it needs the Microsoft Graph application permission
-**`Application.Read.All`** with admin consent, and a federated credential:
+e2e test. It needs **no Microsoft Graph permission**: a service principal can
+read its own application and service principal details without one (see
+"Permissions for specific scenarios" on Microsoft's *List servicePrincipals*
+page). It only needs a federated credential:
 
 | Field    | Value |
 |----------|-------|
