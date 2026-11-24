@@ -1,0 +1,31 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xqueries.e2e.msgraph.upbound.io
+spec:
+  group: e2e.msgraph.upbound.io
+  scope: Namespaced
+  names:
+    kind: XQuery
+    plural: xqueries
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+          status:
+            type: object
+            properties:
+              servicePrincipals:
+                # At least one result, so "not found" can't pass: the status
+                # write is rejected and the XR never goes Ready.
+                type: array
+                minItems: 1
+                items:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true

@@ -1,0 +1,81 @@
+# function-msgraph end-to-end tests
+
+This directory is a small Upbound project used only to run **real** end-to-end
+tests for `function-msgraph`: `up test run tests/* --e2e` installs it on a
+throwaway control plane, together with the function built from the pull request,
+and checks that the function answers a live Microsoft Graph query. It is never
+published to production.
+
+## Layout
+
+```
+e2e/
+├── upbound.yaml                 # test configuration; depends on the function under test (pinned by CI)
+├── apis/xqueries/               # XRD + Composition that call the function
+├── functions/.gitkeep           # must exist for `up`
+└── tests/
+    └── e2etest-queries/
+        └── test.yaml            # E2ETest: default DRC audience + identity Secret, applies an XQuery, waits for Ready
+```
+
+The query reads the details of the e2e app's own service principal
+(`ServicePrincipalDetails` for `solutions-e2e-function`). It reads no user or group
+data and changes nothing. Any sign-in or query error (including a missing Graph
+permission) makes the function return a fatal result, so the XR never becomes
+`Ready` and the test fails. A service principal that isn't found gives an empty
+result, not an error, so the XRD requires at least one entry in
+`status.servicePrincipals`: an empty result is rejected and the XR never becomes
+`Ready` either. (Checked: querying a name that doesn't exist fails the test.)
+
+## Credentials (no Azure secrets in CI)
+
+The function signs in with Azure workload identity, using the Upbound OIDC token
+of its own pod:
+
+- `test.yaml` patches the control plane's `default` `DeploymentRuntimeConfig` with
+  `proidc.cloud-spaces.upbound.io/audience: api://AzureADTokenExchange`. Upbound
+  then mounts a token for that audience at
+  `/var/run/secrets/upbound.io/provider/token` (function pods too).
+- `test.yaml` also creates the `azure-e2e-identity` Secret the Composition passes
+  to the function. It holds only non-secret values: the Entra app (client) ID, the
+  tenant ID and the token path.
+
+### Entra setup
+
+App registration `solutions-e2e-function` (client ID
+`b7b332bc-677c-4bae-a3ba-0aa7e6b2f24a`), shared with the function-azresourcegraph
+e2e test. It needs **no Microsoft Graph permission**: a service principal can
+read its own application and service principal details without one (see
+"Permissions for specific scenarios" on Microsoft's *List servicePrincipals*
+page). It only needs a federated credential:
+
+| Field    | Value |
+|----------|-------|
+| Issuer   | `https://proidc.upbound.io` |
+| Audience | `api://AzureADTokenExchange` |
+| Subject  | `mcp:solutions/function-msgraph-e2e-wrapper-uptest-e2e-msgraph:function:solutions-function-msgraph` |
+
+Entra matches the subject exactly. It is `mcp:<org>/<control plane>:function:<Function name>`:
+`up test` names the control plane `<project>-uptest-<test>`, and a function
+installed as a dependency is named `<org>-<repo>`. Renaming the project, the test
+or the org changes the subject, and the federated credential must follow.
+
+## Two repos, one function
+
+The function dev build is pushed to `solutions/<repo>` and the wrapper project to
+**`solutions/<repo>-e2e-wrapper`**. They must be separate: Crossplane's package
+lock keys dependency-graph nodes by source repo, so a project and a function
+sharing one repo collide (`node ... already exists`). The `<repo>-e2e-wrapper`
+repo is granted to the e2e robot in `solutions-gitops-prod`.
+
+## What runs in CI
+
+On a pull request labelled `run-e2e-tests`, `.github/workflows/e2e.yaml` (synced
+from `upbound/sa-up`):
+
+1. builds the function package from the PR head and pushes it to `solutions/<repo>`
+   at a dev tag,
+2. pins that tag in `upbound.yaml` (`@FUNCTION_VERSION@`),
+3. switches to the e2e Spaces control plane group, and
+4. runs `up test run tests/* --e2e`, pushing the wrapper project to
+   `solutions/<repo>-e2e-wrapper`.
