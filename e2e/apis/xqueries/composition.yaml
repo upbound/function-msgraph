@@ -1,0 +1,36 @@
+# One read-only Microsoft Graph query: the details of the e2e app's own service
+# principal (needs Application.Read.All, no user data). The function signs in
+# with Azure workload identity, exchanging the Upbound OIDC token for an Entra
+# token. Any sign-in or query error (for example a missing Graph permission) is
+# fatal, so the XR never goes Ready.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xqueries.e2e.msgraph.upbound.io
+spec:
+  compositeTypeRef:
+    apiVersion: e2e.msgraph.upbound.io/v1alpha1
+    kind: XQuery
+  mode: Pipeline
+  pipeline:
+  - step: service-principal
+    functionRef:
+      name: solutions-function-msgraph
+    input:
+      apiVersion: msgraph.fn.crossplane.io/v1alpha1
+      kind: Input
+      identity:
+        type: AzureWorkloadIdentityCredentials
+      queryType: ServicePrincipalDetails
+      servicePrincipals:
+      - solutions-e2e-function
+      target: status.servicePrincipals
+    credentials:
+    - name: azure-creds
+      source: Secret
+      secretRef:
+        namespace: crossplane-system
+        name: azure-e2e-identity
+  - step: auto-ready
+    functionRef:
+      name: crossplane-contrib-function-auto-ready
