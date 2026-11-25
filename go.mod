@@ -2,7 +2,7 @@ module github.com/upbound/function-msgraph
 
 go 1.26.10
 
-toolchain go1.26.11
+toolchain go1.27.4
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.15.0
