@@ -4213,7 +4213,7 @@ func TestIdentityType(t *testing.T) {
 			},
 		},
 		"AzureWorkloadIdentityCredentialsWithoutSecret": {
-			reason: "The Function should not require the azure-creds Secret for Workload Identity, which the pod environment can provide entirely",
+			reason: "The Function should not fail on a missing azure-creds Secret for Workload Identity and should go on to the graph query",
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
@@ -4373,6 +4373,65 @@ func TestIdentityType(t *testing.T) {
 
 			if diff := cmp.Diff(tc.want.err, err, cmpopts.EquateErrors()); diff != "" {
 				t.Errorf("%s\nf.RunFunction(...): -want err, +got err:\n%s", tc.reason, diff)
+			}
+		})
+	}
+}
+
+func TestInitializeWorkloadIdentityProvider(t *testing.T) {
+	type want struct {
+		err bool
+	}
+
+	cases := map[string]struct {
+		reason string
+		env    map[string]string
+		creds  map[string]string
+		want   want
+	}{
+		"NilCredsWithWebhookEnv": {
+			reason: "Without a credentials Secret the provider should fall back to the variables the workload identity webhook injects",
+			env: map[string]string{
+				"AZURE_CLIENT_ID":            "env-client-id",
+				"AZURE_TENANT_ID":            "env-tenant-id",
+				"AZURE_FEDERATED_TOKEN_FILE": "/var/run/secrets/azure/tokens/azure-identity-token",
+			},
+			creds: nil,
+		},
+		"NilCredsWithoutWebhookEnv": {
+			reason: "Without a credentials Secret and without the webhook variables the provider should fail",
+			env: map[string]string{
+				"AZURE_CLIENT_ID":            "",
+				"AZURE_TENANT_ID":            "",
+				"AZURE_FEDERATED_TOKEN_FILE": "",
+			},
+			creds: nil,
+			want:  want{err: true},
+		},
+		"CredsOverrideMissingEnv": {
+			reason: "Keys in the credentials Secret should be enough when the webhook variables are missing",
+			env: map[string]string{
+				"AZURE_CLIENT_ID":            "",
+				"AZURE_TENANT_ID":            "",
+				"AZURE_FEDERATED_TOKEN_FILE": "",
+			},
+			creds: map[string]string{
+				ClientID:                       "secret-client-id",
+				TenantID:                       "secret-tenant-id",
+				WorkloadIdentityCredentialPath: "/tmp/azure-identity-token",
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+
+			_, err := (&GraphQuery{}).initializeWorkloadIdentityProvider(tc.creds)
+			if gotErr := err != nil; gotErr != tc.want.err {
+				t.Errorf("%s\ninitializeWorkloadIdentityProvider(...): want error %t, got %v", tc.reason, tc.want.err, err)
 			}
 		})
 	}

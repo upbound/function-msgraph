@@ -64,7 +64,8 @@ that carries the `azure.workload.identity/use: "true"` label and runs with an
 annotated service account, and the function reads those variables when the
 corresponding key is absent. A credentials Secret is therefore only needed to
 override them, for example to use a different client id than the one on the
-service account:
+service account. Both keys are optional: `clientId` defaults to
+`AZURE_CLIENT_ID` and `tenantId` defaults to `AZURE_TENANT_ID`.
 
 ```yaml
 apiVersion: v1
@@ -76,9 +77,8 @@ type: Opaque
 stringData:
   credentials: |
     {
-      "clientId": "your-client-id", # optional, defaults to AZURE_CLIENT_ID
-      "tenantId": "your-tenant-id", # optional, defaults to AZURE_TENANT_ID
-      "federatedTokenFile": "/var/run/secrets/azure/tokens/azure-identity-token" # optional, defaults to AZURE_FEDERATED_TOKEN_FILE
+      "clientId": "your-client-id",
+      "tenantId": "your-tenant-id"
     }
 ```
 
