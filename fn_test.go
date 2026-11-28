@@ -4215,6 +4215,85 @@ func TestIdentityType(t *testing.T) {
 				},
 			},
 		},
+		"AzureWorkloadIdentityCredentialsWithoutSecret": {
+			reason: "The Function should not fail on a missing azure-creds Secret for Workload Identity and should go on to the graph query",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "GroupObjectIDs",
+						"groupsRef": "status.groups",
+						"target": "status.groupObjectIDs",
+						"identity": {
+							"type": "AzureWorkloadIdentityCredentials"
+						}
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  `failed to initialize workload identity provider: failed to obtain workloadidentity credentials`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+				},
+			},
+		},
+		"AzureServicePrincipalCredentialsWithoutSecret": {
+			reason: "The Function should still require the azure-creds Secret for service principal credentials",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Meta: &fnv1.RequestMeta{Tag: testRequestTag},
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "msgraph.fn.crossplane.io/v1alpha1",
+						"kind": "Input",
+						"queryType": "GroupObjectIDs",
+						"groupsRef": "status.groups",
+						"target": "status.groupObjectIDs"
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: &fnv1.RunFunctionResponse{
+					Meta: &fnv1.ResponseMeta{Tag: testRequestTag, Ttl: durationpb.New(response.DefaultTTL)},
+					Results: []*fnv1.Result{
+						{
+							Severity: fnv1.Severity_SEVERITY_FATAL,
+							Message:  `failed to get azure-creds credentials`,
+							Target:   fnv1.Target_TARGET_COMPOSITE.Enum(),
+						},
+					},
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(xr),
+						},
+					},
+				},
+			},
+		},
 		"AzureWorkloadIdentityCredentials": {
 			reason: "The Function should use Workload Identity credentials if identity.type is AzureWorkloadIdentityCredentials",
 			args: args{
@@ -4297,6 +4376,65 @@ func TestIdentityType(t *testing.T) {
 
 			if diff := cmp.Diff(tc.want.err, err, cmpopts.EquateErrors()); diff != "" {
 				t.Errorf("%s\nf.RunFunction(...): -want err, +got err:\n%s", tc.reason, diff)
+			}
+		})
+	}
+}
+
+func TestInitializeWorkloadIdentityProvider(t *testing.T) {
+	type want struct {
+		err bool
+	}
+
+	cases := map[string]struct {
+		reason string
+		env    map[string]string
+		creds  map[string]string
+		want   want
+	}{
+		"NilCredsWithWebhookEnv": {
+			reason: "Without a credentials Secret the provider should fall back to the variables the workload identity webhook injects",
+			env: map[string]string{
+				"AZURE_CLIENT_ID":            "env-client-id",
+				"AZURE_TENANT_ID":            "env-tenant-id",
+				"AZURE_FEDERATED_TOKEN_FILE": "/var/run/secrets/azure/tokens/azure-identity-token",
+			},
+			creds: nil,
+		},
+		"NilCredsWithoutWebhookEnv": {
+			reason: "Without a credentials Secret and without the webhook variables the provider should fail",
+			env: map[string]string{
+				"AZURE_CLIENT_ID":            "",
+				"AZURE_TENANT_ID":            "",
+				"AZURE_FEDERATED_TOKEN_FILE": "",
+			},
+			creds: nil,
+			want:  want{err: true},
+		},
+		"CredsOverrideMissingEnv": {
+			reason: "Keys in the credentials Secret should be enough when the webhook variables are missing",
+			env: map[string]string{
+				"AZURE_CLIENT_ID":            "",
+				"AZURE_TENANT_ID":            "",
+				"AZURE_FEDERATED_TOKEN_FILE": "",
+			},
+			creds: map[string]string{
+				ClientID:                       "secret-client-id",
+				TenantID:                       "secret-tenant-id",
+				WorkloadIdentityCredentialPath: "/tmp/azure-identity-token",
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+
+			_, err := (&GraphQuery{}).initializeWorkloadIdentityProvider(tc.creds)
+			if gotErr := err != nil; gotErr != tc.want.err {
+				t.Errorf("%s\ninitializeWorkloadIdentityProvider(...): want error %t, got %v", tc.reason, tc.want.err, err)
 			}
 		})
 	}

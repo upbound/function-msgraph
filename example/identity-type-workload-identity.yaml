@@ -27,9 +27,3 @@ spec:
         skipQueryWhenTargetHasData: true
         identity:
           type: AzureWorkloadIdentityCredentials
-      credentials:
-        - name: azure-creds
-          source: Secret
-          secretRef:
-            namespace: crossplane-system
-            name: azure-workload-identity-creds
